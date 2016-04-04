@@ -19,7 +19,7 @@ type SVC
     SVC(;kernel="rbf", degree=3, gamma=0.0, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose)
 end
 
-function fit(clf::SVC, X::Matrix, y::Vector)
+function fit!(clf::SVC, X::Matrix, y::Vector)
     clf.gamma = 1/size(X, 2)
     svc = svmtrain(y, X', 
         kernel_type=LIBSVM.RBF,
@@ -80,13 +80,20 @@ recall_score(y_observed, y_pred; ave_fun=nothing, pos_label=nothing) = fun_score
 f1_score(y_observed, y_pred; ave_fun=nothing, pos_label=nothing) = fun_score(f1_score, y_observed, y_pred, ave_fun, pos_label)
 
 remove_nans(scor::Float64) = isnan(scor) ? 0.0 : scor
-remove_nans(scors::Dict{AbstractString, Float64}) = map(x -> isnan(x[2]) ? (x[1], 0.0) : (x[1], x[2]), scors)
+function remove_nans(scors::Dict{AbstractString, Float64}) 
+    for scor in scors 
+        if isnan(scor[2])
+            scors[scor[1]] = 0.0
+        end
+    end
+    scors
+end
 
 function precision_score(y_observed, y_pred, pos_label)
     tp = get_tp(y_observed, y_pred, pos_label)
     fp = get_fp(y_observed, y_pred, pos_label)
     if tp + fp == 0.0
-        warn("TP + FP == 0 for precision. Setting precision to 0.0")
+        warn("TP + FP == 0 for precision for label $(pos_label). Setting precision to 0.0")
         return 0.0
     else
         tp/(tp + fp)
@@ -97,7 +104,7 @@ function recall_score(y_observed, y_pred, pos_label)
     tp = get_tp(y_observed, y_pred, pos_label)
     fn = get_fn(y_observed, y_pred, pos_label)
     if tp + fn == 0.0
-        warn("TP + FN == 0 for recall. Setting recall to 0.0")
+        warn("TP + FN == 0 for recall for label $(pos_label). Setting recall to 0.0")
         return 0.0
     else
         tp/(tp + fn)
@@ -108,12 +115,27 @@ function f1_score(y_observed, y_pred, pos_label)
     prec = precision_score(y_observed, y_pred, pos_label)
     recall = recall_score(y_observed, y_pred, pos_label)
     if prec + recall == 0.0
-        warn("Precision and recall == 0.0 for F1. Setting F1 to 0.0")
+        warn("Precision and recall == 0.0 for F1 for label $(pos_label). Setting F1 to 0.0")
     end
     2*prec*recall/(prec + recall)
 end
 
+################ Cross Validation ###############
+function kfold(n_items::Int, n_folds::Integer=2)
+    function kfold_producer()
+        ratio = (n_folds - 1)/n_folds
+        idx = collect(1:n_items)
+        idx_test = idx .> round(Int, ratio*n_items)
+        test_len = sum(idx_test)
+        for f in 1:n_folds
+            idx_test_f = circshift(idx_test, test_len*(f - 1))
+            produce(idx[!idx_test_f], idx[idx_test_f])
+        end
+    end
+    Task(kfold_producer)
+end
+
 ################ Exports ###############
-export SVC, fit, predict, precision_score, recall_score, f1_score
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold
 end
 
