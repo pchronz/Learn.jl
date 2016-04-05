@@ -29,3 +29,72 @@ fit!(clf, X, y)
 y_pred = predict(clf, X)
 @test all(y .== y_pred)
 
+####### Cross validation #######
+####### k-fold
+N = 9
+X = [collect(1:N) collect(1:N)]
+y = map(x->x?1:0, reshape(X[:, 1] .> 4, size(X)[1]))
+kf = kfold(y, 3)
+i = 1
+for (idx_tr, idx_test) in kf
+    if i == 1
+        @test idx_tr == collect(1:6)
+        @test idx_test == collect(7:9)
+    elseif i == 2
+        @test idx_tr == collect(4:9)
+        @test idx_test == collect(1:3)
+    elseif i == 3
+        @test idx_tr == [1, 2, 3, 7, 8, 9]
+        @test idx_test == collect(4:6)
+    end
+    i += 1
+end
+####### Stratified k-fold
+N = 30
+X = [collect(1:N) collect(1:N)]
+y = map(reshape(X[:, 1], size(X)[1])) do x
+    if x < 0.3*N
+        0
+    elseif x > 0.6*N
+        2
+    else
+        1
+    end
+end
+skf = stratified_kfold(y, 3)
+i = 1
+for (idx_tr, idx_test) in skf
+    X_tr = X[idx_tr, :]
+    X_test = X[idx_test, :]
+    y_tr = y[idx_tr]
+    y_test = y[idx_test]
+    if i == 1
+        @test idx_tr == [1,2,3,4,5,9,10,11,12,13,14,15,19,20,21,22,23,24,25,26]
+        @test idx_test == [6,7,8,16,17,18,27,28,29,30]
+    elseif i == 2
+        @test idx_tr == [4,5,6,7,8,12,13,14,15,16,17,18,23,24,25,26,27,28,29,30]
+        @test idx_test == [1,2,3,9,10,11,19,20,21,22]
+    elseif i == 3
+        @test idx_tr == [1,2,3,7,8,9,10,11,15,16,17,18,19,20,21,22,27,28,29,30]
+        @test idx_test == [4,5,6,12,13,14,23,24,25,26]
+    end
+    i += 1
+end
+
+####### cross_val_score
+N = 50
+X = [collect(1:N) collect(1:N)]
+y = map(reshape(X[:, 1], size(X)[1])) do x
+    if x < 0.3*N
+        0
+    elseif x > 0.6*N
+        2
+    else
+        1
+    end
+end
+scores = cross_val_score!(SVC(), X, y)
+@test_approx_eq scores["0"] 1/1.2
+@test_approx_eq scores["1"] 1/1.2
+@test_approx_eq scores["2"] 0.9266666666666667 
+
