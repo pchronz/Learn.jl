@@ -34,7 +34,7 @@ y_pred = predict(clf, X)
 N = 9
 X = [collect(1:N) collect(1:N)]
 y = map(x->x?1:0, reshape(X[:, 1] .> 4, size(X)[1]))
-kf = kfold(y, 3)
+kf = kfold(y; k=3)
 i = 1
 for (idx_tr, idx_test) in kf
     if i == 1
@@ -61,7 +61,7 @@ y = map(reshape(X[:, 1], size(X)[1])) do x
         1
     end
 end
-skf = stratified_kfold(y, 3)
+skf = stratified_kfold(y; k=3)
 i = 1
 for (idx_tr, idx_test) in skf
     X_tr = X[idx_tr, :]
@@ -93,8 +93,25 @@ y = map(reshape(X[:, 1], size(X)[1])) do x
         1
     end
 end
-scores = cross_val_score!(SVC(), X, y)
+scores = cross_val_score!(SVC(), X, y; cv=y->stratified_kfold(y; k=10))
 @test_approx_eq scores["0"] 1/1.2
 @test_approx_eq scores["1"] 1/1.2
 @test_approx_eq scores["2"] 0.9266666666666667 
+
+####### GridSearchCV
+N = 50
+X = [collect(1:N) collect(1:N)]
+y = map(reshape(X[:, 1], size(X)[1])) do x
+    if x < 0.3*N
+        0
+    elseif x > 0.6*N
+        1
+    else
+        1
+    end
+end
+params = Dict{ASCIIString, Vector}("C"=>[0.01, 0.1, 1., 10., 100., 1000., 10000., 100000., 1000000.], "kernel"=>["rbf", "linear", "polynomial", "sigmoid"])
+gs = GridSearchCV(SVC(), params; scoring=f1_score, cv=y->stratified_kfold(y; k=10))
+fit!(gs, X, y)
+@test gs.best_score > 0.9
 

@@ -1,9 +1,15 @@
 # TODO run in parallel wherever possible or advantageous
+# TODO keyword arguments instead of positional ones
 module jlearn
 ################ SVC ###############
 using LIBSVM
+# TODO CSVC
+# TODO NuSVC
+# TODO OneClassSVM
+# TODO EpsilonSVR
+# TODO NuSVR
 type SVC
-    kernel::AbstractString
+    kernel::ASCIIString
     degree::Integer
     gamma::Float64
     coef0::Float64
@@ -21,9 +27,23 @@ type SVC
 end
 
 function fit!(clf::SVC, X::Matrix, y::Vector)
-    clf.gamma = 1/size(X, 2)
+    function get_kernel(k_str::ASCIIString)
+        if k_str == "rbf"
+            LIBSVM.RBF
+        elseif k_str == "linear"
+            LIBSVM.Linear
+        elseif k_str == "polynomial"
+            LIBSVM.Polynomial
+        elseif k_str == "sigmoid"
+            LIBSVM.Sigmoid
+        else
+            error("Unknown kernel \"$(k_str)\"")
+        end
+    end
+    kernel = get_kernel(clf.kernel)
+    clf.gamma = 1/size(X, 1)
     svc = svmtrain(y, X', 
-        kernel_type=LIBSVM.RBF,
+        kernel_type=kernel,
         degree=clf.degree,
         gamma=clf.gamma,
         coef0=clf.coef0, 
@@ -51,37 +71,33 @@ get_fn(y_observed, y_pred, label) = sum((y_observed .== label) & !(y_pred .== la
 # TODO "Micro" (prec, recall, f1)
 # TODO "Weighted" (prec, recall, f1)
 # TODO "Samples" (prec, recall, f1)
-function fun_score(fun, y_observed, y_pred, ave_fun, pos_label)
+fun_score(fun::Function, y_observed::Vector, y_pred::Vector, pos_label::Any) = remove_nans(fun(y_observed, y_pred, pos_label))
+function fun_score(fun::Function, y_observed::Vector, y_pred::Vector; ave_fun::Union{ASCIIString, Void}=nothing)
     labels = unique([unique(y_observed); unique(y_pred)])
-    if length(labels) == 2
-        if pos_label == nothing
-            return remove_nans(fun(y_observed, y_pred, labels[2]))
-        else
-            return remove_nans(fun(y_observed, y_pred, pos_label))
+    scors = Dict{ASCIIString, Float64}()
+    for (i, label) in enumerate(labels)
+        scors[string(label)] = fun(y_observed, y_pred, label)
+    end
+    if ave_fun == nothing
+        return remove_nans(scors)
+    elseif ave_fun == "macro"
+        scor_mean = 0
+        for (label, scor) in scors
+            scor_mean += scor
         end
-    else
-        scors = Dict{AbstractString, Float64}()
-        for (i, label) in enumerate(labels)
-            scors[string(label)] = fun(y_observed, y_pred, label)
-        end
-        if ave_fun == nothing
-            return remove_nans(scors)
-        elseif ave_fun == "macro"
-            scor_mean = 0
-            for (label, scor) in scors
-                scor_mean += scor
-            end
-            return remove_nans(scor_mean/length(scors))
-        end
+        return remove_nans(scor_mean/length(scors))
     end
 end
 
-precision_score(y_observed, y_pred; ave_fun=nothing, pos_label=nothing) = fun_score(precision_score, y_observed, y_pred, ave_fun, pos_label)
-recall_score(y_observed, y_pred; ave_fun=nothing, pos_label=nothing) = fun_score(recall_score, y_observed, y_pred, ave_fun, pos_label)
-f1_score(y_observed, y_pred; ave_fun=nothing, pos_label=nothing) = fun_score(f1_score, y_observed, y_pred, ave_fun, pos_label)
+precision_score(y_observed, y_pred; ave_fun::Union{ASCIIString, Void}=nothing) = fun_score(precision_score, y_observed, y_pred; ave_fun=ave_fun)
+precision_score(y_observed, y_pred, pos_label) = fun_score(precision_score, y_observed, y_pred, pos_label)
+recall_score(y_observed, y_pred; ave_fun::Union{ASCIIString, Void}=nothing) = fun_score(recall_score, y_observed, y_pred; ave_fun=ave_fun)
+recall_score(y_observed, y_pred, pos_label) = fun_score(recall_score, y_observed, y_pred, pos_label)
+f1_score(y_observed, y_pred; ave_fun::Union{ASCIIString, Void}=nothing) = fun_score(f1_score, y_observed, y_pred; ave_fun=ave_fun)
+f1_score(y_observed, y_pred, pos_label) = fun_score(f1_score, y_observed, y_pred, pos_label)
 
 remove_nans(scor::Float64) = isnan(scor) ? 0.0 : scor
-function remove_nans(scors::Dict{AbstractString, Float64}) 
+function remove_nans(scors::Dict{ASCIIString, Float64}) 
     for scor in scors 
         if isnan(scor[2])
             scors[scor[1]] = 0.0
@@ -122,7 +138,7 @@ function f1_score(y_observed, y_pred, pos_label)
 end
 
 ################ Cross Validation ###############
-function kfold(y::Vector, k::Integer=10)
+function kfold(y::Vector; k::Integer=10)
     n_items = length(y)
     if n_items < k
         error("n_items < k")
@@ -141,17 +157,14 @@ function kfold(y::Vector, k::Integer=10)
 end
 
 # TODO Extend accepted types of y to anything reasonable
-function stratified_kfold(y::Vector{Int}, k::Integer=2)
+function stratified_kfold(y::Vector{Int}; k::Integer=2)
     # XXX k needs to be leq than the num of least items with lower count of labels
-    if length(y) < k
-        error("n_items < k")
-    end
     function stratified_kfold_producer()
         ratio = (k - 1)/k
         labels = unique(y)
-        idxs = Dict{AbstractString, Dict}()
+        idxs = Dict{ASCIIString, Dict}()
         for lbl in labels
-            idxs[string(lbl)] = Dict{AbstractString, Any}()
+            idxs[string(lbl)] = Dict{ASCIIString, Any}()
             # Get the indices and their locations
             idx_lbl = collect(1:length(y))[y .== lbl]
             idx_lbl_boundary = round(Int, ratio * length(idx_lbl))
@@ -188,12 +201,13 @@ end
 
 # TODO extend to take a dict of scoring functions
 # TODO Support for average function for scoring?
-function cross_val_score!(estimator::SVC, X::Matrix, y::Vector, scoring::Function=f1_score, cv::Function=stratified_kfold, n_folds=10)
-    scores = Dict{AbstractString, Union(Vector{Float64}, Float64)}()
+# TODO keyword arguments
+function cross_val_score!(estimator::SVC, X::Matrix, y::Vector; cv::Function=stratified_kfold, scoring::Function=f1_score)
+    scores = Dict{ASCIIString, Union(Vector{Float64}, Float64)}()
     for l in unique(y)
-        scores[string(l)] = zeros(n_folds)
+        scores[string(l)] = Float64[]
     end
-    cv = cv(y, n_folds)
+    cv = cv(y)
     for (fold, (idx_tr, idx_test)) in enumerate(cv)
         X_tr = X[idx_tr, :]
         X_test = X[idx_test, :]
@@ -204,17 +218,75 @@ function cross_val_score!(estimator::SVC, X::Matrix, y::Vector, scoring::Functio
         y_pred = predict(estimator, X_test)
         scor_f = scoring(y_test, y_pred)
         for (label, scor) in scor_f
-            scores[label][fold] = scor
+            push!(scores[label], scor)
         end
     end
-    # Compute the mean values
     for (label, scors) in scores
         scores[label] = mean(scors)
     end
     scores
 end
 
+function Base.convert(::Type{Dict{Symbol, Vector}}, params_string::Dict{ASCIIString, Vector})
+    params_sym = Dict{Symbol, Vector}()
+    for (k, v) in params_string
+        params_sym[symbol(k)] = v
+    end
+    params_sym
+end
+# TODO Verbosity
+type GridSearchCV
+    estimator::SVC
+    param_grid::Dict{Symbol, Vector}
+    scoring::Function
+    cv::Function
+    best_score::Float64
+    best_estimator::SVC
+    best_params::Dict{Symbol, Any}
+    scores::Dict{Dict{Symbol, Any}, Float64}
+    GridSearchCV(estimator::SVC, param_grid::Dict{ASCIIString, Vector}; scoring=f1_score, cv=stratified_kfold) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, 0.0)
+end
+
+function fit!(gridsearch::GridSearchCV, X::Matrix, y::Vector)
+    # Going through the tree recursively.
+    function next_params(params, established)
+        params = copy(params)
+        key = collect(keys(params))[1]
+        vals = params[key]
+        delete!(params, key)
+        for v in vals
+            params_cur = copy(established)
+            params_cur[key] = v
+            if length(keys(params)) == 0
+                produce(params_cur)
+            else
+                next_params(params, params_cur)
+            end
+        end
+    end
+    function param_iterator()
+        next_params(gridsearch.param_grid, Dict{Symbol, Any}())
+    end
+    gridsearch.scores = Dict{Dict{Symbol, Any}, Float64}()
+    for param_set in Task(param_iterator)
+        # XXX How to set the number of folds here? Probably CV needs more types to store state.
+        svc = SVC(;map(x->(x[1], x[2]), param_set)...)
+        scores_param = cross_val_score!(svc, X, y; cv=gridsearch.cv, scoring=gridsearch.scoring)
+        # Aggregate scores across labels
+        score_param = reduce((x1, x2)->("sum", x1[2] + x2[2]), scores_param)[2]/length(scores_param)
+        # Store results and their params
+        gridsearch.scores[param_set] = score_param
+        # Store the best result
+        if score_param > gridsearch.best_score
+            gridsearch.best_score = score_param
+            gridsearch.best_estimator = svc
+            gridsearch.best_params = param_set
+        end
+    end
+    gridsearch
+end
+
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV
 end
 
