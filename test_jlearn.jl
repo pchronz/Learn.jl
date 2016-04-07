@@ -23,7 +23,7 @@ f1_dict = f1_score(y, y_pred)
 
 ####### SVC #######
 clf = SVC()
-X = [collect(1:100) collect(1:100)]
+X = [collect(1.:100.) collect(1.:100.)]
 y = map(x->x?1:0, reshape(X[:, 1] .> 50, size(X)[1]))
 fit!(clf, X, y)
 y_pred = predict(clf, X)
@@ -82,7 +82,7 @@ for (idx_tr, idx_test) in skf
 end
 
 ####### cross_val_score
-N = 50
+N = 50.0
 X = [collect(1:N) collect(1:N)]
 y = map(reshape(X[:, 1], size(X)[1])) do x
     if x < 0.3*N
@@ -99,7 +99,7 @@ scores = cross_val_score!(SVC(), X, y; cv=y->stratified_kfold(y; k=10))
 @test_approx_eq scores["2"] 0.9266666666666667 
 
 ####### GridSearchCV
-N = 50
+N = 50.0
 X = [collect(1:N) collect(1:N)]
 y = map(reshape(X[:, 1], size(X)[1])) do x
     if x < 0.3*N
@@ -111,7 +111,30 @@ y = map(reshape(X[:, 1], size(X)[1])) do x
     end
 end
 params = Dict{ASCIIString, Vector}("C"=>[0.01, 0.1, 1., 10., 100., 1000., 10000., 100000., 1000000.], "kernel"=>["rbf", "linear", "polynomial", "sigmoid"])
-gs = GridSearchCV(SVC(), params; scoring=f1_score, cv=y->stratified_kfold(y; k=10))
+# XXX Why is julia not inferring the parametric type here?
+#gs = GridSearchCV(SVC(), params; scoring=f1_score, cv=y->stratified_kfold(y; k=10))
+gs = GridSearchCV{SVC}(SVC(), params; scoring=f1_score, cv=y->stratified_kfold(y; k=10))
 fit!(gs, X, y)
 @test gs.best_score > 0.9
+
+####### Preprocessing #######
+N = 50.0
+X = [collect(1:N) collect(1:N)]
+y = map(reshape(X[:, 1], size(X)[1])) do x
+    if x < 0.3*N
+        0
+    elseif x > 0.6*N
+        1
+    else
+        1
+    end
+end
+
+mms = MinMaxScaler()
+X_mms = fit_transform(mms, X)
+@test all(minimum(X_mms, 1) .== 0.0)
+@test all(maximum(X_mms, 1) .== 1.0)
+@test X != X_mms
+
+####### Pipeline #######
 

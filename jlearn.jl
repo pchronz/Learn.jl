@@ -8,7 +8,8 @@ using LIBSVM
 # TODO OneClassSVM
 # TODO EpsilonSVR
 # TODO NuSVR
-type SVC
+abstract Estimator
+type SVC <: Estimator
     kernel::ASCIIString
     degree::Integer
     gamma::Float64
@@ -26,7 +27,7 @@ type SVC
     SVC(;kernel="rbf", degree=3, gamma=0.0, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose)
 end
 
-function fit!(clf::SVC, X::Matrix, y::Vector)
+function fit!(clf::SVC, X::Matrix{Float64}, y::Vector)
     function get_kernel(k_str::ASCIIString)
         if k_str == "rbf"
             LIBSVM.RBF
@@ -59,7 +60,7 @@ function fit!(clf::SVC, X::Matrix, y::Vector)
     clf.svc = svc
     clf
 end
-function predict(clf::SVC, X::Matrix)
+function predict(clf::SVC, X::Matrix{Float64})
     svmpredict(clf.svc, X')[1]
 end
 
@@ -137,6 +138,47 @@ function f1_score(y_observed, y_pred, pos_label)
     2*prec*recall/(prec + recall)
 end
 
+################ Pre-processing ###############
+abstract Preprocessor
+type MinMaxScaler <: Preprocessor
+    range_min::Float64
+    range_max::Float64
+end
+MinMaxScaler() = MinMaxScaler(0.0, 1.0)
+function fit_transform(mms::MinMaxScaler, X::Matrix{Float64})
+    X = copy(X)
+    for col = 1:size(X, 2)
+        mn, mx = extrema(X[:, col])
+        X[:, col] -= mn
+        X[:, col] /= (mx - mn)
+    end
+    X
+end
+
+################ Pipeline ###############
+type Pipeline <: Estimator
+    preprocessors::Vector{Tuple{ASCIIString, Preprocessor}}
+    estimator::Tuple{ASCIIString, Estimator}
+end
+Pipeline(prepro::Tuple{ASCIIString, Preprocessor}, est::Tuple{ASCIIString, Estimator}) = Pipeline([prepro], est)
+function fit_transform(prepros::Vector{Preprocessor}, X::Matrix{Float64})
+    for prepro = prepros
+        X = fit_transform(prepro, X)
+    end
+    X
+end
+function fit!(pipe::Pipeline, X::Matrix{Float64}, y::Vector)
+    prepros::Vector{Preprocessor} = map(x->x[2], pipe.preprocessors)
+    X = fit_transform(prepros, X)
+    fit!(pipe.estimator[2], X, y)
+    return pipe
+end
+function predict(pipe::Pipeline, X::Matrix{Float64})
+    prepros::Vector{Preprocessor} = map(x->x[2], pipe.preprocessors)
+    X = fit_transform(prepros, X)
+    predict(pipe.estimator[2], X)
+end
+
 ################ Cross Validation ###############
 function kfold(y::Vector; k::Integer=10)
     n_items = length(y)
@@ -202,7 +244,7 @@ end
 # TODO extend to take a dict of scoring functions
 # TODO Support for average function for scoring?
 # TODO keyword arguments
-function cross_val_score!(estimator::SVC, X::Matrix, y::Vector; cv::Function=stratified_kfold, scoring::Function=f1_score)
+function cross_val_score!(estimator::SVC, X::Matrix{Float64}, y::Vector; cv::Function=stratified_kfold, scoring::Function=f1_score)
     scores = Dict{ASCIIString, Union(Vector{Float64}, Float64)}()
     for l in unique(y)
         scores[string(l)] = Float64[]
@@ -235,8 +277,8 @@ function Base.convert(::Type{Dict{Symbol, Vector}}, params_string::Dict{ASCIIStr
     params_sym
 end
 # TODO Verbosity
-type GridSearchCV
-    estimator::SVC
+type GridSearchCV{T<:Estimator}
+    estimator::T
     param_grid::Dict{Symbol, Vector}
     scoring::Function
     cv::Function
@@ -244,34 +286,43 @@ type GridSearchCV
     best_estimator::SVC
     best_params::Dict{Symbol, Any}
     scores::Dict{Dict{Symbol, Any}, Float64}
-    GridSearchCV(estimator::SVC, param_grid::Dict{ASCIIString, Vector}; scoring=f1_score, cv=stratified_kfold) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, 0.0)
+    GridSearchCV(estimator::T, param_grid::Dict{ASCIIString, Vector}; scoring=f1_score, cv=stratified_kfold) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, 0.0)
 end
 
-function fit!(gridsearch::GridSearchCV, X::Matrix, y::Vector)
-    # Going through the tree recursively.
-    function next_params(params, established)
-        params = copy(params)
-        key = collect(keys(params))[1]
-        vals = params[key]
-        delete!(params, key)
-        for v in vals
-            params_cur = copy(established)
-            params_cur[key] = v
-            if length(keys(params)) == 0
-                produce(params_cur)
-            else
-                next_params(params, params_cur)
-            end
+# Going through the tree recursively.
+function next_params(params, established)
+    params = copy(params)
+    key = collect(keys(params))[1]
+    vals = params[key]
+    delete!(params, key)
+    for v in vals
+        params_cur = copy(established)
+        params_cur[key] = v
+        if length(keys(params)) == 0
+            produce(params_cur)
+        else
+            next_params(params, params_cur)
         end
     end
-    function param_iterator()
-        next_params(gridsearch.param_grid, Dict{Symbol, Any}())
+end
+# XXX How about some metaprogamming instead?
+function set_params!(svc::Union{Estimator, Preprocessor}, params)
+    for (k, v) in params
+        setfield!(svc, symbol(k), v)
     end
+    svc
+end
+function fit!(gridsearch::GridSearchCV{Pipeline}, X::Matrix, y::Vector)
+    error("Not implemented yet")
+end
+function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
+    param_iterator() = next_params(gridsearch.param_grid, Dict{Symbol, Any}())
     gridsearch.scores = Dict{Dict{Symbol, Any}, Float64}()
     for param_set in Task(param_iterator)
-        # XXX How to set the number of folds here? Probably CV needs more types to store state.
-        svc = SVC(;map(x->(x[1], x[2]), param_set)...)
-        scores_param = cross_val_score!(svc, X, y; cv=gridsearch.cv, scoring=gridsearch.scoring)
+        # TODO Integrate with Pipeline
+        #est = set_params!(gridsearch.estimator; map(x->(x[1], x[2]), param_set)...)
+        est = set_params!(gridsearch.estimator, param_set)
+        scores_param = cross_val_score!(est, X, y; cv=gridsearch.cv, scoring=gridsearch.scoring)
         # Aggregate scores across labels
         score_param = reduce((x1, x2)->("sum", x1[2] + x2[2]), scores_param)[2]/length(scores_param)
         # Store results and their params
@@ -279,14 +330,15 @@ function fit!(gridsearch::GridSearchCV, X::Matrix, y::Vector)
         # Store the best result
         if score_param > gridsearch.best_score
             gridsearch.best_score = score_param
-            gridsearch.best_estimator = svc
+            gridsearch.best_estimator = est
             gridsearch.best_params = param_set
         end
     end
     gridsearch
 end
 
+
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform, Pipeline, MetaPipeline
 end
 
