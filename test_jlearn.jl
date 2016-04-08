@@ -137,4 +137,43 @@ X_mms = fit_transform(mms, X)
 @test X != X_mms
 
 ####### Pipeline #######
+N = 50.0
+X = [collect(1:N) collect(1:N)]
+y = map(reshape(X[:, 1], size(X)[1])) do x
+    if x < 0.3*N
+        0
+    elseif x > 0.6*N
+        1
+    else
+        1
+    end
+end
+
+pipe = Pipeline(("mms_1", MinMaxScaler()), ("svc", SVC()))
+pipe = Pipeline([("mms_1", MinMaxScaler()), ("mms_2", MinMaxScaler())], ("svc", SVC()))
+fit!(pipe, X, y)
+y_pred = predict(pipe, X)
+@test_approx_eq f1_score(y, y_pred)["1"] 0.8372093023255813
+@test f1_score(y, y_pred)["0"] == 0.0
+
+params = Dict{ASCIIString, Vector}("mms_1__range_min"=>[0.0], "mms_1__range_max"=>[1.0], "mms_2__range_min"=>[10.0], "mms_2__range_max"=>[100.0],"svc__C"=>[0.01, 0.1, 1., 10., 100., 1000., 10000., 100000., 1000000.], "svc__kernel"=>["rbf", "linear", "polynomial", "sigmoid"])
+# XXX Why doesn't type infernce work here?
+#GridSearchCV(pipe, params)
+gs = GridSearchCV{Pipeline}(pipe, params)
+fit!(gs, X, y)
+@test gs.best_score == 1.0
+@test gs.best_params[:mms_1__range_min] == 0.0
+@test gs.best_params[:mms_1__range_max] == 1.0
+@test gs.best_params[:svc__kernel] == "linear"
+@test gs.best_params[:svc__C] == 1.0
+@test gs.best_estimator.preprocessors[1][1] == "mms_1"
+@test gs.best_estimator.preprocessors[1][2].range_min == 0.0
+@test gs.best_estimator.preprocessors[1][2].range_max == 1.0
+@test gs.best_estimator.preprocessors[2][1] == "mms_2"
+@test gs.best_estimator.preprocessors[2][2].range_min == 10.0
+@test gs.best_estimator.preprocessors[2][2].range_max == 100.0
+@test gs.best_estimator.estimator[1] == "svc"
+@test gs.best_estimator.estimator[2].kernel == "linear"
+@test gs.best_estimator.estimator[2].C == 1.0
+
 

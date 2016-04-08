@@ -1,3 +1,4 @@
+# TODO Document
 # TODO run in parallel wherever possible or advantageous
 # TODO keyword arguments instead of positional ones
 module jlearn
@@ -26,7 +27,6 @@ type SVC <: Estimator
     svc::LIBSVM.SVMModel
     SVC(;kernel="rbf", degree=3, gamma=0.0, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose)
 end
-
 function fit!(clf::SVC, X::Matrix{Float64}, y::Vector)
     function get_kernel(k_str::ASCIIString)
         if k_str == "rbf"
@@ -244,7 +244,7 @@ end
 # TODO extend to take a dict of scoring functions
 # TODO Support for average function for scoring?
 # TODO keyword arguments
-function cross_val_score!(estimator::SVC, X::Matrix{Float64}, y::Vector; cv::Function=stratified_kfold, scoring::Function=f1_score)
+function cross_val_score!(estimator::Estimator, X::Matrix{Float64}, y::Vector; cv::Function=stratified_kfold, scoring::Function=f1_score)
     scores = Dict{ASCIIString, Union(Vector{Float64}, Float64)}()
     for l in unique(y)
         scores[string(l)] = Float64[]
@@ -283,7 +283,7 @@ type GridSearchCV{T<:Estimator}
     scoring::Function
     cv::Function
     best_score::Float64
-    best_estimator::SVC
+    best_estimator::T
     best_params::Dict{Symbol, Any}
     scores::Dict{Dict{Symbol, Any}, Float64}
     GridSearchCV(estimator::T, param_grid::Dict{ASCIIString, Vector}; scoring=f1_score, cv=stratified_kfold) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, 0.0)
@@ -306,21 +306,42 @@ function next_params(params, established)
     end
 end
 # XXX How about some metaprogamming instead?
-function set_params!(svc::Union{Estimator, Preprocessor}, params)
+function set_params!(stage::Union{Estimator, Preprocessor}, params)
     for (k, v) in params
-        setfield!(svc, symbol(k), v)
+        setfield!(stage, symbol(k), v)
     end
-    svc
+    stage
 end
-function fit!(gridsearch::GridSearchCV{Pipeline}, X::Matrix, y::Vector)
-    error("Not implemented yet")
+function set_params!(pipe::Pipeline, params)
+    function stage_params(params, name::ASCIIString)
+        rgx = Regex("^($(name))__(.+)\$")
+        stg_params = map(params) do x
+            mtch = match(rgx, string(x[1])) 
+            mtch == nothing ? nothing : (mtch[2], x[2])
+        end
+        filter!(x->x != nothing, stg_params)
+        Dict{ASCIIString, Any}(stg_params)
+    end
+    # Iterate over pipe stages
+    for stage in pipe.preprocessors
+        name = stage[1]
+        prepro = stage[2]
+        stg_params = stage_params(params, name)
+        set_params!(prepro, stg_params)
+    end
+    # Get params for the estimator
+    name = pipe.estimator[1]
+    est = pipe.estimator[2]
+    # Set the estimator params
+    est_params = stage_params(params, name)
+    set_params!(est, est_params)
+    pipe
 end
 function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
     param_iterator() = next_params(gridsearch.param_grid, Dict{Symbol, Any}())
     gridsearch.scores = Dict{Dict{Symbol, Any}, Float64}()
     for param_set in Task(param_iterator)
-        # TODO Integrate with Pipeline
-        #est = set_params!(gridsearch.estimator; map(x->(x[1], x[2]), param_set)...)
+        info("GridSearchCV params: $(param_set)")
         est = set_params!(gridsearch.estimator, param_set)
         scores_param = cross_val_score!(est, X, y; cv=gridsearch.cv, scoring=gridsearch.scoring)
         # Aggregate scores across labels
@@ -330,13 +351,13 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
         # Store the best result
         if score_param > gridsearch.best_score
             gridsearch.best_score = score_param
-            gridsearch.best_estimator = est
+            gridsearch.best_estimator = deepcopy(est)
             gridsearch.best_params = param_set
         end
+        info("Score: $(score_param)")
     end
     gridsearch
 end
-
 
 ################ Exports ###############
 export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform, Pipeline, MetaPipeline
