@@ -3,7 +3,7 @@ using Base.Test
 using jlearn
 using PyPlot
 
-# TODO Whitening
+# All of the following are available in MultivariateStats
 # TODO PCA
 # TODO ICA
 
@@ -19,14 +19,14 @@ y = map(reshape(X[:, 1], size(X)[1])) do x
     end
 end
 
-pipe = Pipeline([("mms_1", MinMaxScaler()), ("mms_2", MinMaxScaler())], ("svc", SVC()))
-pipe = Pipeline(("mms_1", MinMaxScaler()), ("svc", SVC()))
+pipe = Pipeline(("ss_1", StandardScaler()), ("svc", SVC()))
+pipe = Pipeline([("ss", StandardScaler()), ("pca", PCA())], ("svc", SVC()))
 fit!(pipe, X, y)
 @show y
 y_pred = predict(pipe, X)
 @show y_pred
 
-params = Dict{ASCIIString, Vector}("mms_1__range_min"=>[0.0], "mms_1__range_max"=>[1.0],"svc__C"=>[0.01, 0.1, 1., 10., 100., 1000., 10000., 100000., 1000000.], "svc__kernel"=>["rbf", "linear", "polynomial", "sigmoid"])
+params = Dict{ASCIIString, Vector}("svc__C"=>[0.01, 0.1, 1., 10., 100., 1000., 10000., 100000., 1000000.], "svc__kernel"=>["rbf", "linear", "polynomial", "sigmoid"])
 # XXX Why doesn't type infernce work here?
 #GridSearchCV(pipe, params)
 gs = GridSearchCV{Pipeline}(pipe, params)

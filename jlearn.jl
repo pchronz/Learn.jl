@@ -4,6 +4,7 @@
 module jlearn
 ################ SVC ###############
 using LIBSVM
+import MultivariateStats
 # TODO CSVC
 # TODO NuSVC
 # TODO OneClassSVM
@@ -151,8 +152,27 @@ function fit_transform(mms::MinMaxScaler, X::Matrix{Float64})
         mn, mx = extrema(X[:, col])
         X[:, col] -= mn
         X[:, col] /= (mx - mn)
+        X[:, col] *= (mms.range_max - mms.range_min)
+        X[:, col] += mms.range_min
     end
     X
+end
+type StandardScaler <: Preprocessor
+end
+function fit_transform(ss::StandardScaler, X::Matrix{Float64})
+    X = copy(X)
+    X = X .- mean(X, 1) 
+    X = X ./ sqrt(var(X, 1))
+    X
+end
+type PCA <: Preprocessor
+    # TODO Paramters
+    # TODO Tests
+end
+function fit_transform(pca::PCA, X::Matrix{Float64})
+    X = copy(X)
+    M = MultivariateStats.fit(MultivariateStats.PCA, X')
+    MultivariateStats.transform(M, X')'
 end
 
 ################ Pipeline ###############
@@ -360,6 +380,6 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
 end
 
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform, Pipeline, MetaPipeline
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform, Pipeline, MetaPipeline, StandardScaler, PCA
 end
 

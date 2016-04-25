@@ -135,6 +135,11 @@ X_mms = fit_transform(mms, X)
 @test all(minimum(X_mms, 1) .== 0.0)
 @test all(maximum(X_mms, 1) .== 1.0)
 @test X != X_mms
+mms = MinMaxScaler(10.0, 50.0)
+X_mms = fit_transform(mms, X)
+@test all(minimum(X_mms, 1) .== 10.0)
+@test all(maximum(X_mms, 1) .== 50.0)
+@test X != X_mms
 
 ####### Pipeline #######
 N = 50.0
@@ -149,31 +154,28 @@ y = map(reshape(X[:, 1], size(X)[1])) do x
     end
 end
 
-pipe = Pipeline(("mms_1", MinMaxScaler()), ("svc", SVC()))
-pipe = Pipeline([("mms_1", MinMaxScaler()), ("mms_2", MinMaxScaler())], ("svc", SVC()))
+pipe = Pipeline([("mms", MinMaxScaler()), ("ss", StandardScaler())], ("svc", SVC()))
 fit!(pipe, X, y)
 y_pred = predict(pipe, X)
-@test_approx_eq f1_score(y, y_pred)["1"] 0.8372093023255813
-@test f1_score(y, y_pred)["0"] == 0.0
+@test_approx_eq f1_score(y, y_pred)["1"] 1.0
+@test f1_score(y, y_pred)["0"] == 1.0
 
-params = Dict{ASCIIString, Vector}("mms_1__range_min"=>[0.0], "mms_1__range_max"=>[1.0], "mms_2__range_min"=>[10.0], "mms_2__range_max"=>[100.0],"svc__C"=>[0.01, 0.1, 1., 10., 100., 1000., 10000., 100000., 1000000.], "svc__kernel"=>["rbf", "linear", "polynomial", "sigmoid"])
+params = Dict{ASCIIString, Vector}("mms__range_min"=>[0.0], "mms__range_max"=>[1.0], "svc__C"=>[0.01, 0.1, 1., 10., 100., 1000., 10000., 100000., 1000000.], "svc__kernel"=>["rbf", "linear", "polynomial", "sigmoid"])
 # XXX Why doesn't type infernce work here?
 #GridSearchCV(pipe, params)
 gs = GridSearchCV{Pipeline}(pipe, params)
 fit!(gs, X, y)
 @test gs.best_score == 1.0
-@test gs.best_params[:mms_1__range_min] == 0.0
-@test gs.best_params[:mms_1__range_max] == 1.0
+@test gs.best_params[:mms__range_min] == 0.0
+@test gs.best_params[:mms__range_max] == 1.0
 @test gs.best_params[:svc__kernel] == "linear"
-@test gs.best_params[:svc__C] == 1.0
-@test gs.best_estimator.preprocessors[1][1] == "mms_1"
+@test gs.best_params[:svc__C] == 0.1
+@test gs.best_estimator.preprocessors[1][1] == "mms"
 @test gs.best_estimator.preprocessors[1][2].range_min == 0.0
 @test gs.best_estimator.preprocessors[1][2].range_max == 1.0
-@test gs.best_estimator.preprocessors[2][1] == "mms_2"
-@test gs.best_estimator.preprocessors[2][2].range_min == 10.0
-@test gs.best_estimator.preprocessors[2][2].range_max == 100.0
+@test gs.best_estimator.preprocessors[2][1] == "ss"
 @test gs.best_estimator.estimator[1] == "svc"
 @test gs.best_estimator.estimator[2].kernel == "linear"
-@test gs.best_estimator.estimator[2].C == 1.0
+@test gs.best_estimator.estimator[2].C == 0.1
 
 
