@@ -130,16 +130,48 @@ y = map(reshape(X[:, 1], size(X)[1])) do x
     end
 end
 
+####### MinMaxScaler
 mms = MinMaxScaler()
-X_mms = fit_transform(mms, X)
+X_mms = fit_transform!(mms, X)
 @test all(minimum(X_mms, 1) .== 0.0)
 @test all(maximum(X_mms, 1) .== 1.0)
 @test X != X_mms
 mms = MinMaxScaler(10.0, 50.0)
-X_mms = fit_transform(mms, X)
+X_mms = fit_transform!(mms, X)
 @test all(minimum(X_mms, 1) .== 10.0)
 @test all(maximum(X_mms, 1) .== 50.0)
 @test X != X_mms
+
+####### StandardScaler
+ss = StandardScaler()
+X_ss = fit_transform!(ss, X)
+for m in mean(X_ss, 1)
+    @test_approx_eq_eps m 0.0 1e-12
+end
+for m in var(X_ss, 1)
+    @test_approx_eq m 1.0 
+end
+@test X != X_ss
+
+####### PCA
+N = 50.0
+mt = MersenneTwister(42)
+X = rand(mt, round(Int, N), 2)
+pca = PCA()
+X_pca = fit_transform!(pca, X)
+@test_approx_eq pca.explained_variance_ratio_[1] 0.5420700035608417 
+@test_approx_eq pca.explained_variance_ratio_[2] 0.45792999643915844 
+@test_approx_eq pca.M.proj[1] -0.8435103551544426
+@test_approx_eq pca.M.proj[2] -0.5371129124748595 
+
+####### ICA
+N = 50.0
+mt = MersenneTwister(42)
+X = rand(mt, round(Int, N), 2)
+ica = FastICA(;n_components=2, whiten=true)
+X_ica = fit_transform!(ica, X)
+@test_approx_eq ica.M.mean[1] 0.4831187641151334 
+@test_approx_eq ica.M.mean[2] 0.4641596857176869 
 
 ####### Pipeline #######
 N = 50.0

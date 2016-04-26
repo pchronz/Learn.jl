@@ -5,6 +5,10 @@ module jlearn
 ################ SVC ###############
 using LIBSVM
 import MultivariateStats
+####### Aliases
+typealias Noint Union{Void, Int}
+typealias Nofloat Union{Void, Float64}
+
 # TODO CSVC
 # TODO NuSVC
 # TODO OneClassSVM
@@ -141,12 +145,14 @@ end
 
 ################ Pre-processing ###############
 abstract Preprocessor
+
+####### MinMaxScaler
 type MinMaxScaler <: Preprocessor
     range_min::Float64
     range_max::Float64
 end
 MinMaxScaler() = MinMaxScaler(0.0, 1.0)
-function fit_transform(mms::MinMaxScaler, X::Matrix{Float64})
+function fit_transform!(mms::MinMaxScaler, X::Matrix{Float64})
     X = copy(X)
     for col = 1:size(X, 2)
         mn, mx = extrema(X[:, col])
@@ -157,22 +163,59 @@ function fit_transform(mms::MinMaxScaler, X::Matrix{Float64})
     end
     X
 end
+
+####### StandardScaler
 type StandardScaler <: Preprocessor
 end
-function fit_transform(ss::StandardScaler, X::Matrix{Float64})
+function fit_transform!(ss::StandardScaler, X::Matrix{Float64})
     X = copy(X)
     X = X .- mean(X, 1) 
     X = X ./ sqrt(var(X, 1))
     X
 end
+
+####### PCA
 type PCA <: Preprocessor
-    # TODO Paramters
-    # TODO Tests
+    n_components::Union{Void, Int}
+    M::MultivariateStats.PCA
+    explained_variance_ratio_::Vector{Float64}
+    PCA(n_components::Union{Void, Int}) = new(n_components)
 end
-function fit_transform(pca::PCA, X::Matrix{Float64})
-    X = copy(X)
-    M = MultivariateStats.fit(MultivariateStats.PCA, X')
+PCA(;n_components::Union{Void, Int}=nothing) = PCA(n_components)
+function fit_transform!(pca::PCA, X::Matrix{Float64})
+    if pca.n_components == nothing
+        M = MultivariateStats.fit(MultivariateStats.PCA, X')
+    else
+        M = MultivariateStats.fit(MultivariateStats.PCA, X'; maxoutdim=pca.n_components)
+    end
+    pca.M = M
+    pca.explained_variance_ratio_ = MultivariateStats.principalvars(M)
+    pca.explained_variance_ratio_ /= sum(pca.explained_variance_ratio_)
     MultivariateStats.transform(M, X')'
+end
+
+####### FastICA
+type FastICA <: Preprocessor
+    n_components::Noint
+    params::Dict{Symbol, Any}
+    M::MultivariateStats.ICA
+    components_::Matrix{Float64}
+    function FastICA(n_components::Noint, whiten::Bool, max_iter::Noint, tol::Nofloat)
+        fica = new(n_components, Dict{Symbol, Any}())
+        fica.params[:do_whiten] = whiten
+        if max_iter != nothing fica.params[:maxiter] = max_iter end
+        if tol != nothing fica.params[:tol] = tol end
+        fica
+    end
+end
+FastICA(;n_components::Noint=nothing, whiten::Bool=false, max_iter::Noint=nothing, tol::Nofloat=nothing) = FastICA(n_components, whiten, max_iter, tol)
+function fit_transform!(ica::FastICA, X::Matrix{Float64})
+    # Prepare the parameters
+    n_components = ica.n_components == nothing ? size(X, 2) : ica.n_components
+    M = MultivariateStats.fit(MultivariateStats.ICA, X', n_components; ica.params...)
+    ica.M = M
+    ica.components_ = M.W'
+    MultivariateStats.transform(M, X')
 end
 
 ################ Pipeline ###############
@@ -181,21 +224,21 @@ type Pipeline <: Estimator
     estimator::Tuple{ASCIIString, Estimator}
 end
 Pipeline(prepro::Tuple{ASCIIString, Preprocessor}, est::Tuple{ASCIIString, Estimator}) = Pipeline([prepro], est)
-function fit_transform(prepros::Vector{Preprocessor}, X::Matrix{Float64})
+function fit_transform!(prepros::Vector{Preprocessor}, X::Matrix{Float64})
     for prepro = prepros
-        X = fit_transform(prepro, X)
+        X = fit_transform!(prepro, X)
     end
     X
 end
 function fit!(pipe::Pipeline, X::Matrix{Float64}, y::Vector)
     prepros::Vector{Preprocessor} = map(x->x[2], pipe.preprocessors)
-    X = fit_transform(prepros, X)
+    X = fit_transform!(prepros, X)
     fit!(pipe.estimator[2], X, y)
     return pipe
 end
 function predict(pipe::Pipeline, X::Matrix{Float64})
     prepros::Vector{Preprocessor} = map(x->x[2], pipe.preprocessors)
-    X = fit_transform(prepros, X)
+    X = fit_transform!(prepros, X)
     predict(pipe.estimator[2], X)
 end
 
@@ -380,6 +423,6 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
 end
 
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform, Pipeline, MetaPipeline, StandardScaler, PCA
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA
 end
 
