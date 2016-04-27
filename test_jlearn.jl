@@ -5,21 +5,31 @@ using jlearn
 ####### Metrics #######
 y = [0, 1, 2, 0, 1, 2]
 y_pred = [0, 2, 1, 0, 0, 1]
+####### Precision
 prec_dict = precision_score(y, y_pred)
 @test_approx_eq prec_dict["0"] 2/3
 @test prec_dict["1"] == 0.0
 @test prec_dict["2"] == 0.0
 @test precision_score(y, y_pred, ave_fun="macro") == 2/9
+####### Recall
 recall_dict = recall_score(y, y_pred)
 @test recall_dict["0"] == 1.0
 @test recall_dict["1"] == 0.0
 @test recall_dict["2"] == 0.0
 @test_approx_eq recall_score(y, y_pred, ave_fun="macro") 1/3
+####### F1
 f1_dict = f1_score(y, y_pred)
 @test f1_dict["0"] == 0.8
 @test f1_dict["1"] == 0.
 @test f1_dict["2"] == 0.
 @test f1_score(y, y_pred, ave_fun="macro") == 0.
+####### R^2
+N = 50.
+y_true = collect(1:N)
+y_pred = ones(round(Int, N), 1) * mean(y_true)
+y_pred = reshape(y_pred, round(Int, N))
+@test r2_score(y_true, y_pred) == 0.
+@test r2_score(y_true, y_true) == 1.
 
 ####### SVC #######
 clf = SVC()
@@ -28,6 +38,15 @@ y = map(x->x?1:0, reshape(X[:, 1] .> 50, size(X)[1]))
 fit!(clf, X, y)
 y_pred = predict(clf, X)
 @test all(y .== y_pred)
+
+####### SVR ######
+N = 50.0
+X = reshape(collect(1:N), round(Int, N), 1)
+y = reshape(map(x->x^2, X), round(Int, N))
+reg = SVR()
+fit!(reg, X, y)
+y_pred = predict(reg, X)
+@test_approx_eq r2_score(y, y_pred) 0.6938326967702597 
 
 ####### Cross validation #######
 ####### k-fold
@@ -209,5 +228,4 @@ fit!(gs, X, y)
 @test gs.best_estimator.estimator[1] == "svc"
 @test gs.best_estimator.estimator[2].svm.kernel == "linear"
 @test gs.best_estimator.estimator[2].svm.C == 0.1
-
 

@@ -2,7 +2,7 @@
 # TODO run in parallel wherever possible or advantageous
 # TODO keyword arguments instead of positional ones
 module jlearn
-################ SVC ###############
+################ SVM ###############
 using LIBSVM
 import MultivariateStats
 ####### Aliases
@@ -32,6 +32,7 @@ type SVMWrapper
     SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose) = new(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose)
 end
 abstract SVM <: Estimator
+################ SVC
 type SVC <: SVM
     svm::SVMWrapper
     SVC(;kernel="rbf", degree=3, gamma=0.0, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose))
@@ -73,15 +74,16 @@ end
 fit!(clf::SVC, X::Matrix{Float64}, y::Vector) = fit!(clf.svm, Int32(0), X, y)
 predict(clf::SVC, X::Matrix{Float64}) = svmpredict(clf.svm.libsvm, X')[1]
 
-################ SVR ###############
+################ SVR
 type SVR <: SVM
+    svm::SVMWrapper
+    SVR(;kernel="rbf", degree=3, gamma=0.0, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose))
 end
-function fit!(reg::SVR, X::Matrix{Float64}, y::Vector)
-end
-function predict(reg::SVR, X::Matrix{Float64})
-end
+fit!(reg::SVR, X::Matrix{Float64}, y::Vector) = fit!(reg.svm, Int32(3), X, y)
+predict(reg, X::Matrix{Float64}) = svmpredict(reg.svm.libsvm, X')[1]
 
 ################ Metrics ###############
+####### Classifier scores
 get_tp(y_observed, y_pred, label) = sum((y_observed .== label) & (y_pred .== label))
 get_fp(y_observed, y_pred, label) = sum(!(y_observed .== label) & (y_pred .== label))
 get_fn(y_observed, y_pred, label) = sum((y_observed .== label) & !(y_pred .== label))
@@ -153,6 +155,11 @@ function f1_score(y_observed, y_pred, pos_label)
         warn("Precision and recall == 0.0 for F1 for label $(pos_label). Setting F1 to 0.0")
     end
     2*prec*recall/(prec + recall)
+end
+
+####### Regression scores
+function r2_score(y_true::Vector{Float64}, y_pred::Vector{Float64})
+    1. - sum((y_true - y_pred).^2)/(sum((y_true .- mean(y_true)).^2))
 end
 
 ################ Pre-processing ###############
@@ -442,6 +449,6 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
 end
 
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score
 end
 
