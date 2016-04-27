@@ -207,7 +207,7 @@ fit!(gs, X, y)
 @test gs.best_estimator.preprocessors[1][2].range_max == 1.0
 @test gs.best_estimator.preprocessors[2][1] == "ss"
 @test gs.best_estimator.estimator[1] == "svc"
-@test gs.best_estimator.estimator[2].kernel == "linear"
-@test gs.best_estimator.estimator[2].C == 0.1
+@test gs.best_estimator.estimator[2].svm.kernel == "linear"
+@test gs.best_estimator.estimator[2].svm.C == 0.1
 
 

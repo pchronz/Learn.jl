@@ -12,10 +12,9 @@ typealias Nofloat Union{Void, Float64}
 # TODO CSVC
 # TODO NuSVC
 # TODO OneClassSVM
-# TODO EpsilonSVR
 # TODO NuSVR
 abstract Estimator
-type SVC <: Estimator
+type SVMWrapper
     kernel::ASCIIString
     degree::Integer
     gamma::Float64
@@ -29,10 +28,15 @@ type SVC <: Estimator
     probability_estimates::Bool
     weights
     verbose::Bool
-    svc::LIBSVM.SVMModel
-    SVC(;kernel="rbf", degree=3, gamma=0.0, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose)
+    libsvm::LIBSVM.SVMModel
+    SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose) = new(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose)
 end
-function fit!(clf::SVC, X::Matrix{Float64}, y::Vector)
+abstract SVM <: Estimator
+type SVC <: SVM
+    svm::SVMWrapper
+    SVC(;kernel="rbf", degree=3, gamma=0.0, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose))
+end
+function fit!(svm::SVMWrapper, svm_type::Int32, X::Matrix{Float64}, y::Vector)
     function get_kernel(k_str::ASCIIString)
         if k_str == "rbf"
             LIBSVM.RBF
@@ -46,27 +50,35 @@ function fit!(clf::SVC, X::Matrix{Float64}, y::Vector)
             error("Unknown kernel \"$(k_str)\"")
         end
     end
-    kernel = get_kernel(clf.kernel)
-    clf.gamma = 1/size(X, 1)
-    svc = svmtrain(y, X', 
+    kernel = get_kernel(svm.kernel)
+    svm.gamma = 1/size(X, 1)
+    # XXX Use dictionary to store the params in SVM and splice in here.
+    libsvm = svmtrain(y, X', 
+        svm_type=svm_type,
         kernel_type=kernel,
-        degree=clf.degree,
-        gamma=clf.gamma,
-        coef0=clf.coef0, 
-        C=clf.C,
-        nu=clf.nu,
-        p=clf.p,
-        cache_size=clf.cache_size,
-        eps=clf.eps,
-        shrinking=clf.shrinking,
-        probability_estimates=clf.probability_estimates,
-        weights=clf.weights,
-        verbose=clf.verbose)
-    clf.svc = svc
-    clf
+        degree=svm.degree,
+        gamma=svm.gamma,
+        coef0=svm.coef0, 
+        C=svm.C,
+        nu=svm.nu,
+        p=svm.p,
+        cache_size=svm.cache_size,
+        eps=svm.eps,
+        shrinking=svm.shrinking,
+        probability_estimates=svm.probability_estimates,
+        weights=svm.weights,
+        verbose=svm.verbose)
+    svm.libsvm = libsvm
 end
-function predict(clf::SVC, X::Matrix{Float64})
-    svmpredict(clf.svc, X')[1]
+fit!(clf::SVC, X::Matrix{Float64}, y::Vector) = fit!(clf.svm, Int32(0), X, y)
+predict(clf::SVC, X::Matrix{Float64}) = svmpredict(clf.svm.libsvm, X')[1]
+
+################ SVR ###############
+type SVR <: SVM
+end
+function fit!(reg::SVR, X::Matrix{Float64}, y::Vector)
+end
+function predict(reg::SVR, X::Matrix{Float64})
 end
 
 ################ Metrics ###############
@@ -372,6 +384,13 @@ end
 function set_params!(stage::Union{Estimator, Preprocessor}, params)
     for (k, v) in params
         setfield!(stage, symbol(k), v)
+    end
+    stage
+end
+function set_params!(stage::SVM, params)
+    svm::SVMWrapper = stage.svm
+    for (k, v) in params
+        setfield!(svm, symbol(k), v)
     end
     stage
 end
