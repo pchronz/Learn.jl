@@ -30,6 +30,14 @@ y_pred = ones(round(Int, N), 1) * mean(y_true)
 y_pred = reshape(y_pred, round(Int, N))
 @test r2_score(y_true, y_pred) == 0.
 @test r2_score(y_true, y_true) == 1.
+####### MSE
+y_true = [3, -0.5, 2, 7] 
+y_pred = [2.5, 0.0, 2, 8] 
+@test mean_squared_error(y_true, y_pred) == 0.375
+####### Explained variance ratio
+y_true = [3, -0.5, 2, 7] 
+y_pred = [2.5, 0.0, 2, 8] 
+@test_approx_eq explained_variance_score(y_true, y_pred) 0.9571734475374732
 
 ####### SVC #######
 clf = SVC()

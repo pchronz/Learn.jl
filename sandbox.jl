@@ -3,5 +3,5 @@ using Base.Test
 using jlearn
 using PyPlot
 
-####### R^2
+
 

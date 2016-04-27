@@ -158,9 +158,9 @@ function f1_score(y_observed, y_pred, pos_label)
 end
 
 ####### Regression scores
-function r2_score(y_true::Vector{Float64}, y_pred::Vector{Float64})
-    1. - sum((y_true - y_pred).^2)/(sum((y_true .- mean(y_true)).^2))
-end
+r2_score(y_true::Vector{Float64}, y_pred::Vector{Float64}) = 1. - sum((y_true - y_pred).^2)/(sum((y_true .- mean(y_true)).^2))
+mean_squared_error(y_true::Vector{Float64}, y_pred::Vector{Float64}) = mean((y_true - y_pred).^2)
+explained_variance_score(y_true::Vector{Float64}, y_pred::Vector{Float64}) = (var(y_true) - var(y_true - y_pred))/var(y_true)
 
 ################ Pre-processing ###############
 abstract Preprocessor
@@ -449,6 +449,6 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
 end
 
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score
 end
 
