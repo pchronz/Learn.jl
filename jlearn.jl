@@ -103,6 +103,7 @@ function score{T<:Number}(reg::LinearRegression, X::Matrix{Float64}, y::Vector{T
 end
 
 ####### Ensemble methods #######
+####### RandomForestRegressor
 type RandomForestRegressor <: Estimator
     nsubfeatures::Integer
     ntrees::Integer
@@ -114,6 +115,19 @@ function fit!{T<:Number}(reg::RandomForestRegressor, X::Matrix{Float64}, y::Vect
 end
 predict(reg::RandomForestRegressor, X::Matrix{Float64}) = DecisionTree.apply_forest(reg.forest, X)
 function score{T<:Number}(reg::RandomForestRegressor, X::Matrix{Float64}, y::Vector{T})
+    y_pred = predict(reg, X)
+    r2_score(y, y_pred)
+end
+####### DecisionTreeRegressor
+type DecisionTreeRegressor <: Estimator
+    tree::DecisionTree.Node
+    DecisionTreeRegressor() = new()
+end
+function fit!{T<:Number}(reg::DecisionTreeRegressor, X::Matrix{Float64}, y::Vector{T}) 
+    reg.tree = DecisionTree.build_tree(y, X)
+end
+predict(reg::DecisionTreeRegressor, X::Matrix{Float64}) = DecisionTree.apply_tree(reg.tree, X)
+function score{T<:Number}(reg::DecisionTreeRegressor, X::Matrix{Float64}, y::Vector{T})
     y_pred = predict(reg, X)
     r2_score(y, y_pred)
 end
@@ -485,6 +499,6 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
 end
 
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor
 end
 
