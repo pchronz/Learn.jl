@@ -6,6 +6,7 @@ module jlearn
 using LIBSVM
 import MultivariateStats
 import GLM
+import DecisionTree
 ####### Aliases
 typealias Noint Union{Void, Int}
 typealias Nofloat Union{Void, Float64}
@@ -83,7 +84,7 @@ end
 fit!{T<:Number}(reg::SVR, X::Matrix{Float64}, y::Vector{T}) = fit!(reg.svm, Int32(3), X, y)
 predict(reg, X::Matrix{Float64}) = svmpredict(reg.svm.libsvm, X')[1]
 
-####### Generalized linear models
+####### Generalized linear models #######
 type LinearRegression <: Estimator
     fit_intercept::Bool
     normalize::Bool
@@ -93,10 +94,29 @@ type LinearRegression <: Estimator
     LinearRegression(;fit_intercept::Bool=true, normalize::Bool=false) = new(fit_intercept, normalize)
 end
 function fit!{T<:Number}(reg::LinearRegression, X::Matrix{Float64}, y::Vector{T})
-    ols = GLM.lm(X, y)
-    reg.lm = ols
+    reg.lm = GLM.lm(X, y)
 end
 predict(reg::LinearRegression, X::Matrix{Float64}) = GLM.predict(reg.lm, X)
+function score{T<:Number}(reg::LinearRegression, X::Matrix{Float64}, y::Vector{T})
+    y_pred = predict(reg, X)
+    r2_score(y, y_pred)
+end
+
+####### Ensemble methods #######
+type RandomForestRegressor <: Estimator
+    nsubfeatures::Integer
+    ntrees::Integer
+    forest::DecisionTree.Ensemble
+    RandomForestRegressor(;nsubfeatures::Integer=2, ntrees::Integer=5) = new(nsubfeatures, ntrees)
+end
+function fit!{T<:Number}(reg::RandomForestRegressor, X::Matrix{Float64}, y::Vector{T}) 
+    reg.forest = DecisionTree.build_forest(y, X, reg.nsubfeatures, reg.ntrees)
+end
+predict(reg::RandomForestRegressor, X::Matrix{Float64}) = DecisionTree.apply_forest(reg.forest, X)
+function score{T<:Number}(reg::RandomForestRegressor, X::Matrix{Float64}, y::Vector{T})
+    y_pred = predict(reg, X)
+    r2_score(y, y_pred)
+end
 
 ################ Metrics ###############
 ####### Classifier scores
@@ -465,6 +485,6 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
 end
 
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor
 end
 

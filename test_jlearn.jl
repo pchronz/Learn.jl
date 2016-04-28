@@ -249,5 +249,21 @@ reg = LinearRegression()
 fit!(reg, X, y)
 y_pred = predict(reg, X)
 @test r2_score(y, y_pred) == 1.0
+@test score(reg, X, y) == 1.0
+
+
+####### Ensemble Methods #######
+####### RandomForestRegressor
+N = 50.0
+X = [collect(1:N) collect(1:N)]
+mt = MersenneTwister(42)
+X[:, 2] += rand(mt, round(Int, N))
+mt = MersenneTwister(42)
+y = reshape(map(x->x + rand(mt), X[:, 1]), round(Int, N))
+reg = RandomForestRegressor()
+fit!(reg, X, y)
+y_pred = predict(reg, X)
+@test r2_score(y, y_pred) > 0.98
+@test score(reg, X, y) > 0.98
 
 
