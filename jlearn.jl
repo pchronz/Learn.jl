@@ -5,6 +5,7 @@ module jlearn
 ################ SVM ###############
 using LIBSVM
 import MultivariateStats
+import GLM
 ####### Aliases
 typealias Noint Union{Void, Int}
 typealias Nofloat Union{Void, Float64}
@@ -79,8 +80,23 @@ type SVR <: SVM
     svm::SVMWrapper
     SVR(;kernel="rbf", degree=3, gamma=0.0, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose))
 end
-fit!(reg::SVR, X::Matrix{Float64}, y::Vector) = fit!(reg.svm, Int32(3), X, y)
+fit!{T<:Number}(reg::SVR, X::Matrix{Float64}, y::Vector{T}) = fit!(reg.svm, Int32(3), X, y)
 predict(reg, X::Matrix{Float64}) = svmpredict(reg.svm.libsvm, X')[1]
+
+####### Generalized linear models
+type LinearRegression <: Estimator
+    fit_intercept::Bool
+    normalize::Bool
+    coef_::Vector{Float64}
+    intercept_::Vector{Float64}
+    lm::GLM.LinearModel
+    LinearRegression(;fit_intercept::Bool=true, normalize::Bool=false) = new(fit_intercept, normalize)
+end
+function fit!{T<:Number}(reg::LinearRegression, X::Matrix{Float64}, y::Vector{T})
+    ols = GLM.lm(X, y)
+    reg.lm = ols
+end
+predict(reg::LinearRegression, X::Matrix{Float64}) = GLM.predict(reg.lm, X)
 
 ################ Metrics ###############
 ####### Classifier scores
@@ -449,6 +465,6 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
 end
 
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression
 end
 

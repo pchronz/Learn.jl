@@ -237,3 +237,17 @@ fit!(gs, X, y)
 @test gs.best_estimator.estimator[2].svm.kernel == "linear"
 @test gs.best_estimator.estimator[2].svm.C == 0.1
 
+####### Linear Models #######
+####### Linear regression
+N = 50.0
+X = [collect(1:N) collect(1:N)]
+mt = MersenneTwister(42)
+X[:, 2] += rand(mt, round(Int, N))
+mt = MersenneTwister(42)
+y = reshape(map(x->x + rand(mt), X[:, 1]), round(Int, N))
+reg = LinearRegression()
+fit!(reg, X, y)
+y_pred = predict(reg, X)
+@test r2_score(y, y_pred) == 1.0
+
+
