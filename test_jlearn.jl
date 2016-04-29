@@ -265,6 +265,15 @@ fit!(reg, X, y)
 y_pred = predict(reg, X)
 @test r2_score(y, y_pred) > 0.98
 @test score(reg, X, y) > 0.98
+
+####### RandomForestClassifier
+clf = RandomForestClassifier()
+X = [collect(1.:100.) collect(1.:100.)]
+y = map(x->x?1:0, reshape(X[:, 1] .> 50, size(X)[1]))
+fit!(clf, X, y)
+y_pred = predict(clf, X)
+@test all(y_pred .== y)
+
 ####### DecisionTreeRegressor
 N = 50.0
 X = [collect(1:N) collect(1:N)]

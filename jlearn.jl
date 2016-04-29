@@ -3,7 +3,7 @@
 # TODO keyword arguments instead of positional ones
 module jlearn
 ################ SVM ###############
-using LIBSVM
+import LIBSVM
 import MultivariateStats
 import GLM
 import DecisionTree
@@ -16,6 +16,8 @@ typealias Nofloat Union{Void, Float64}
 # TODO OneClassSVM
 # TODO NuSVR
 abstract Estimator
+abstract Classifier <: Estimator
+abstract Regressor <: Estimator
 type SVMWrapper
     kernel::ASCIIString
     degree::Integer
@@ -33,9 +35,8 @@ type SVMWrapper
     libsvm::LIBSVM.SVMModel
     SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose) = new(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose)
 end
-abstract SVM <: Estimator
 ################ SVC
-type SVC <: SVM
+type SVC <: Classifier
     svm::SVMWrapper
     SVC(;kernel="rbf", degree=3, gamma=0.0, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose))
 end
@@ -56,7 +57,7 @@ function fit!(svm::SVMWrapper, svm_type::Int32, X::Matrix{Float64}, y::Vector)
     kernel = get_kernel(svm.kernel)
     svm.gamma = 1/size(X, 1)
     # XXX Use dictionary to store the params in SVM and splice in here.
-    libsvm = svmtrain(y, X', 
+    libsvm = LIBSVM.svmtrain(y, X', 
         svm_type=svm_type,
         kernel_type=kernel,
         degree=svm.degree,
@@ -74,18 +75,18 @@ function fit!(svm::SVMWrapper, svm_type::Int32, X::Matrix{Float64}, y::Vector)
     svm.libsvm = libsvm
 end
 fit!(clf::SVC, X::Matrix{Float64}, y::Vector) = fit!(clf.svm, Int32(0), X, y)
-predict(clf::SVC, X::Matrix{Float64}) = svmpredict(clf.svm.libsvm, X')[1]
+predict(clf::SVC, X::Matrix{Float64}) = LIBSVM.svmpredict(clf.svm.libsvm, X')[1]
 
 ################ SVR
-type SVR <: SVM
+type SVR <: Regressor
     svm::SVMWrapper
     SVR(;kernel="rbf", degree=3, gamma=0.0, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose))
 end
 fit!{T<:Number}(reg::SVR, X::Matrix{Float64}, y::Vector{T}) = fit!(reg.svm, Int32(3), X, y)
-predict(reg, X::Matrix{Float64}) = svmpredict(reg.svm.libsvm, X')[1]
+predict(reg, X::Matrix{Float64}) = LIBSVM.svmpredict(reg.svm.libsvm, X')[1]
 
 ####### Generalized linear models #######
-type LinearRegression <: Estimator
+type LinearRegression <: Regressor
     fit_intercept::Bool
     normalize::Bool
     coef_::Vector{Float64}
@@ -104,7 +105,7 @@ end
 
 ####### Ensemble methods #######
 ####### RandomForestRegressor
-type RandomForestRegressor <: Estimator
+type RandomForestRegressor <: Regressor
     nsubfeatures::Integer
     ntrees::Integer
     forest::DecisionTree.Ensemble
@@ -118,8 +119,19 @@ function score{T<:Number}(reg::RandomForestRegressor, X::Matrix{Float64}, y::Vec
     y_pred = predict(reg, X)
     r2_score(y, y_pred)
 end
+type RandomForestClassifier <: Classifier
+    nsubfeatures::Integer
+    ntrees::Integer
+    forest::DecisionTree.Ensemble
+    RandomForestClassifier(;nsubfeatures::Integer=2, ntrees::Integer=5) = new(nsubfeatures, ntrees)
+end
+function fit!{T}(reg::RandomForestClassifier, X::Matrix{Float64}, y::Vector{T}) 
+    reg.forest = DecisionTree.build_forest(y, X, reg.nsubfeatures, reg.ntrees)
+end
+predict(reg::RandomForestClassifier, X::Matrix{Float64}) = DecisionTree.apply_forest(reg.forest, X)
+
 ####### DecisionTreeRegressor
-type DecisionTreeRegressor <: Estimator
+type DecisionTreeRegressor <: Regressor
     tree::DecisionTree.Node
     DecisionTreeRegressor() = new()
 end
@@ -288,11 +300,11 @@ function fit_transform!(ica::FastICA, X::Matrix{Float64})
 end
 
 ################ Pipeline ###############
-type Pipeline <: Estimator
+type Pipeline{T<:Estimator} <: Estimator
     preprocessors::Vector{Tuple{ASCIIString, Preprocessor}}
-    estimator::Tuple{ASCIIString, Estimator}
+    estimator::Tuple{ASCIIString, T}
 end
-Pipeline(prepro::Tuple{ASCIIString, Preprocessor}, est::Tuple{ASCIIString, Estimator}) = Pipeline([prepro], est)
+Pipeline{T<:Estimator}(prepro::Tuple{ASCIIString, Preprocessor}, est::Tuple{ASCIIString, T}) = Pipeline([prepro], est)
 function fit_transform!(prepros::Vector{Preprocessor}, X::Matrix{Float64})
     for prepro = prepros
         X = fit_transform!(prepro, X)
@@ -444,7 +456,7 @@ function set_params!(stage::Union{Estimator, Preprocessor}, params)
     end
     stage
 end
-function set_params!(stage::SVM, params)
+function set_params!(stage::Union{SVC, SVR}, params)
     svm::SVMWrapper = stage.svm
     for (k, v) in params
         setfield!(svm, symbol(k), v)
@@ -499,6 +511,6 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
 end
 
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor, KNeighborsClassifier, RandomForestClassifier
 end
 
