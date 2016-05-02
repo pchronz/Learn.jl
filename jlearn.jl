@@ -2,6 +2,13 @@
 # TODO run in parallel wherever possible or advantageous
 # TODO keyword arguments instead of positional ones
 module jlearn
+####### Multiclass classification strategies #######
+abstract MulticlassStrategy
+type OneVsOneStrategy <: MulticlassStrategy
+end
+type OneVsAllStrategy <: MulticlassStrategy
+end
+
 ################ SVM ###############
 import LIBSVM
 import MultivariateStats
@@ -102,6 +109,66 @@ function score{T<:Number}(reg::LinearRegression, X::Matrix{Float64}, y::Vector{T
     y_pred = predict(reg, X)
     r2_score(y, y_pred)
 end
+type LogisticRegression <: Regressor
+    strategy::MulticlassStrategy
+    glms::Dict{Tuple, GLM.GeneralizedLinearModel}
+    LogisticRegression(strategy::MulticlassStrategy) = new(strategy, Dict{AbstractString, GLM.GeneralizedLinearModel}())
+end
+LogisticRegression() = LogisticRegression(OneVsOneStrategy())
+clf_key(c_1, c_2) = string(c_1) < string(c_2) ? (c_1, c_2) : (c_2, c_1)
+function fit!{T<:Number}(clf::LogisticRegression, X::Matrix{Float64}, y::Vector{T})
+    classes = unique(y)
+    if length(classes) == 2
+        c_key = clf_key(classes[1], classes[2])
+        clf.glms[c_key] = GLM.glm(X, y, GLM.Binomial(), GLM.ProbitLink())
+    else
+        fit_multiclass!(clf, X, y, clf.strategy)
+    end
+end
+function fit_multiclass!{T<:Number}(clf::LogisticRegression, X::Matrix{Float64}, y::Vector{T}, strategy::OneVsOneStrategy)
+    function coerce_domain(y::Vector{T})
+        y_ = sort!(unique(y))
+        # XXX Sort!
+        map(y->y == y_[1] ? 0.0 : 1.0, y)
+    end
+    classes = unique(y)
+    for k in 1:(length(classes) - 1)
+        klass = classes[k]
+        for l in (k + 1):length(classes)
+            lass = classes[l]
+            c_key = clf_key(klass, lass)
+            # Sometimes I don't get Julia or it's overly weird and complicated.
+            idx = reshape(any([(y .== klass) (y .== lass)], 2), length(y))
+            y_10 = coerce_domain(y[idx])
+            clf.glms[c_key] = GLM.glm(X[idx, :], y_10, GLM.Binomial(), GLM.ProbitLink())
+        end
+    end
+end
+function predict_multiclass(clf::LogisticRegression, X::Matrix{Float64})
+    y = Vector{Float64}(size(X, 1))
+    for i in 1:size(X, 1)
+        y[i] = predict_multiclass(clf, reshape(X[i, :], size(X, 2)))
+    end
+    y
+end
+function predict_multiclass(clf::LogisticRegression, x::Vector{Float64})
+    votes = Dict{Any, Int}()
+    for (classes, glm) in clf.glms
+        y_pred = GLM.predict(glm, x')[1] >= 0.5 ? classes[2] : classes[1]
+        votes[y_pred] = haskey(votes, y_pred) ? votes[y_pred] + 1 : 0
+    end
+    reduce((x, y)->x[2] > y[2] ? x : y, votes)[1]
+end
+function predict(clf::LogisticRegression, X::Matrix{Float64})
+    if length(clf.glms) == 1
+        for (classes, glm) = clf.glms
+            y_pred = GLM.predict(glm, X)
+            return map!(x->x>=0.5 ? classes[2] : classes[1], y_pred)
+        end
+    else
+        predict_multiclass(clf::LogisticRegression, X::Matrix{Float64})
+    end
+end
 
 ####### Ensemble methods #######
 ####### RandomForestRegressor
@@ -143,6 +210,15 @@ function score{T<:Number}(reg::DecisionTreeRegressor, X::Matrix{Float64}, y::Vec
     y_pred = predict(reg, X)
     r2_score(y, y_pred)
 end
+####### DecisionTreeClassifier
+type DecisionTreeClassifier <: Classifier
+    tree::DecisionTree.Node
+    DecisionTreeClassifier() = new()
+end
+function fit!{T}(reg::DecisionTreeClassifier, X::Matrix{Float64}, y::Vector{T}) 
+    reg.tree = DecisionTree.build_tree(y, X)
+end
+predict(reg::DecisionTreeClassifier, X::Matrix{Float64}) = DecisionTree.apply_tree(reg.tree, X)
 
 ################ Metrics ###############
 ####### Classifier scores
@@ -511,6 +587,6 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
 end
 
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor, KNeighborsClassifier, RandomForestClassifier
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor, KNeighborsClassifier, RandomForestClassifier, DecisionTreeClassifier, LogisticRegression
 end
 

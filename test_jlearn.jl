@@ -251,6 +251,23 @@ y_pred = predict(reg, X)
 @test r2_score(y, y_pred) == 1.0
 @test score(reg, X, y) == 1.0
 
+###### Logistic regression
+clf = LogisticRegression()
+srand(42)
+N = 100
+X = rand(N, 2)
+y = Array(Float64, N)
+for r in 1:size(X, 1)
+    y[r] = (X[r, 2]/X[r, 1]) > 1. ? 1. : 0.
+end
+X += randn(N, 2) ./ 10
+#scatter(X[y .== 1., 1], X[y .== 1., 2], color="red")
+#scatter(X[y .== 0., 1], X[y .== 0., 2], color="blue")
+#show()
+fit!(clf, X, y)
+y_pred = predict(clf, X)
+@test_approx_eq f1_score(y, y_pred)["0.0"] 0.8913043478260869 
+@test_approx_eq f1_score(y, y_pred)["1.0"] 0.9074074074074074 
 
 ####### Ensemble Methods #######
 ####### RandomForestRegressor
@@ -267,12 +284,13 @@ y_pred = predict(reg, X)
 @test score(reg, X, y) > 0.98
 
 ####### RandomForestClassifier
+srand(42)
 clf = RandomForestClassifier()
 X = [collect(1.:100.) collect(1.:100.)]
 y = map(x->x?1:0, reshape(X[:, 1] .> 50, size(X)[1]))
 fit!(clf, X, y)
 y_pred = predict(clf, X)
-@test all(y_pred .== y)
+@test (y'*y_pred)[1] == 50
 
 ####### DecisionTreeRegressor
 N = 50.0
@@ -287,4 +305,39 @@ y_pred = predict(reg, X)
 @test r2_score(y, y_pred) > 0.99
 @test score(reg, X, y) > 0.99
 
+####### DecisionTreeClassifier
+clf = DecisionTreeClassifier()
+X = [collect(1.:100.) collect(1.:100.)]
+y = map(x->x?1:0, reshape(X[:, 1] .> 50, size(X)[1]))
+fit!(clf, X, y)
+y_pred = predict(clf, X)
+@test all(y_pred .== y)
+
+####### Multilabel classification #######
+####### OneVsOne classification
+clf = LogisticRegression()
+srand(42)
+N = 300
+X = rand(N, 2)
+y = Array(Float64, N)
+for r in 1:size(X, 1)
+    slope = (X[r, 2]/X[r, 1])
+    y[r] = if slope > 1.
+        2.
+    elseif slope < 0.5
+        0.
+    else
+        1.
+    end
+end
+X += randn(N, 2) ./ 20
+#scatter(X[y .== 0., 1], X[y .== 0., 2], color="blue")
+#scatter(X[y .== 1., 1], X[y .== 1., 2], color="red")
+#scatter(X[y .== 2., 1], X[y .== 2., 2], color="green")
+#show()
+fit!(clf, X, y)
+y_pred = predict(clf, X)
+@test_approx_eq f1_score(y, y_pred)["0.0"] 0.9264705882352942
+@test_approx_eq f1_score(y, y_pred)["1.0"] 0.8395061728395061
+@test_approx_eq f1_score(y, y_pred)["2.0"] 0.9403973509933775
 
