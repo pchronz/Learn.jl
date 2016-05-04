@@ -46,6 +46,17 @@ function fit_multiclass!(clf::Classifier, X::Matrix{Float64}, y::Vector, strateg
         end
     end
 end
+function fit_multiclass!(clf::Classifier, X::Matrix{Float64}, y::Vector, strategy::OneVsAllStrategy)
+    classes = unique(y)
+    K = length(classes)
+    for k in 1:K
+        klass = classes[k]
+        y_ = Vector(length(y))
+        y_[y .== klass] = klass
+        y_[y .!= klass] = :the_rest
+        fit_uniclass!(clf, X, y_)
+    end
+end
 function predict(clf::Classifier, X::Matrix{Float64})
     if length(clf.estimators) == 1
         for (classes, estimator) = clf.estimators
@@ -62,6 +73,16 @@ function predict_multiclass(clf::Classifier, x::Vector{Float64}, strategy::OneVs
         votes[y_pred] = haskey(votes, y_pred) ? votes[y_pred] + 1 : 0
     end
     reduce((x, y)->x[2] > y[2] ? x : y, votes)[1]
+end
+function predict_multiclass(clf::Classifier, x::Vector{Float64}, strategy::OneVsAllStrategy)
+    votes = Array{Any}(0)
+    classs = Array{Any}(length(clf.estimators))
+    for (i, (classes, estimator)) in enumerate(clf.estimators)
+        classs[i] = classes[1] != :the_rest ? classes[1] : classes[2]
+        y_pred = predict_uniclass(estimator, classes, x')[1]
+        y_pred != :the_rest ? push!(votes, y_pred) : nothing
+    end
+    length(votes) == 0 ? classs[rand(1:length(classs))] : votes[rand(1:length(votes))]
 end
 function predict_multiclass(clf::Classifier, X::Matrix{Float64})
     y = Vector(size(X, 1))
@@ -169,10 +190,14 @@ type LogisticRegression <: Classifier
     estimators::Dict{Tuple, GLM.GeneralizedLinearModel}
     LogisticRegression(; strategy::MulticlassStrategy=OneVsOneStrategy()) = new(strategy, Dict{AbstractString, GLM.GeneralizedLinearModel}())
 end
-function fit_uniclass!{T<:Number}(clf::LogisticRegression, X::Matrix{Float64}, y::Vector{T})
-    function coerce_domain(y::Vector{T})
-        y_ = sort!(unique(y))
-        map(y->y == y_[1] ? 0.0 : 1.0, y)
+function fit_uniclass!(clf::LogisticRegression, X::Matrix{Float64}, y::Vector)
+    function coerce_domain(y::Vector)
+        y_ = sort!(map(y->string(y), unique(y)))
+        y_10 = Array{Float64}(length(y))
+        for (i, y_i) in enumerate(y)
+            y_10[i] = string(y_i) == y_[1] ? 0.0 : 1.0
+        end
+        y_10
     end
     c_key = clf_key(y)
     y_10 = coerce_domain(y)
@@ -180,7 +205,7 @@ function fit_uniclass!{T<:Number}(clf::LogisticRegression, X::Matrix{Float64}, y
 end
 function predict_uniclass(estimator::GLM.GeneralizedLinearModel, classes::Tuple, X::Matrix{Float64})
     y_pred = GLM.predict(estimator, X)
-    map!(x->x>=0.5 ? classes[2] : classes[1], y_pred)
+    map(x->x>=0.5 ? classes[2] : classes[1], y_pred)
 end
 
 ####### Ensemble methods #######
@@ -204,7 +229,7 @@ type RandomForestClassifier <: Classifier
     nsubfeatures::Integer
     ntrees::Integer
     estimators::Dict{Tuple, DecisionTree.Ensemble}
-    RandomForestClassifier(;nsubfeatures::Integer=2, ntrees::Integer=5) = new(OneVsOneStrategy(), nsubfeatures, ntrees, Dict{Tuple, DecisionTree.Ensemble}())
+    RandomForestClassifier(;nsubfeatures::Integer=2, ntrees::Integer=5, strategy::MulticlassStrategy=OneVsOneStrategy()) = new(strategy, nsubfeatures, ntrees, Dict{Tuple, DecisionTree.Ensemble}())
 end
 function fit_uniclass!(clf::RandomForestClassifier, X::Matrix{Float64}, y::Vector)
     c_key = clf_key(y)
@@ -229,7 +254,7 @@ end
 type DecisionTreeClassifier <: Classifier
     strategy::MulticlassStrategy
     estimators::Dict{Tuple, DecisionTree.Node}
-    DecisionTreeClassifier() = new(OneVsOneStrategy(), Dict{Tuple, DecisionTree.Node}())
+    DecisionTreeClassifier(;strategy::MulticlassStrategy=OneVsOneStrategy()) = new(strategy, Dict{Tuple, DecisionTree.Node}())
 end
 function fit_uniclass!(clf::DecisionTreeClassifier, X::Matrix{Float64}, y::Vector)
     c_key = clf_key(y)
@@ -605,6 +630,6 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
 end
 
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor, RandomForestClassifier, DecisionTreeClassifier, LogisticRegression
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor, RandomForestClassifier, DecisionTreeClassifier, LogisticRegression, OneVsOneStrategy, OneVsAllStrategy
 end
 

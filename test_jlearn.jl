@@ -413,3 +413,102 @@ f1 = f1_score(y, y_pred)
 @test_approx_eq f1["1"] 1.0
 @test_approx_eq f1["2"] 1.0
 
+####### OneVsAll classification via logistic regression
+clf = LogisticRegression(strategy=OneVsAllStrategy())
+srand(42)
+N = 300
+X = rand(N, 2)
+y = Array(Float64, N)
+for r in 1:size(X, 1)
+    slope = (X[r, 2]/X[r, 1])
+    y[r] = if slope > 1.
+        2.
+    elseif slope < 0.5
+        0.
+    else
+        1.
+    end
+end
+X += randn(N, 2) ./ 20
+#scatter(X[y .== 0., 1], X[y .== 0., 2], color="blue")
+#scatter(X[y .== 1., 1], X[y .== 1., 2], color="red")
+#scatter(X[y .== 2., 1], X[y .== 2., 2], color="green")
+#show()
+fit!(clf, X, y)
+y_pred = predict(clf, X)
+@test_approx_eq f1_score(y, y_pred)["0.0"] 0.5833333333333334
+@test_approx_eq f1_score(y, y_pred)["1.0"] 0.33070866141732286 
+@test_approx_eq f1_score(y, y_pred)["2.0"] 0.8693009118541033
+
+####### OneVsAll classification via SVM
+srand(42)
+N = 300
+X = rand(N, 2)
+y = Array(Any, N)
+for r in 1:size(X, 1)
+    slope = (X[r, 2]/X[r, 1])
+    y[r] = if slope > 1.
+        :2
+    elseif slope < 0.5
+        '0'
+    else
+        "1"
+    end
+end
+X += randn(N, 2) ./ 20
+clf = SVC(strategy=OneVsAllStrategy())
+fit!(clf, X, y)
+y_pred = predict(clf, X)
+f1 = f1_score(y, y_pred)
+@test_approx_eq f1["0"] 0.7974683544303798
+@test_approx_eq f1["1"] 0.0
+@test_approx_eq f1["2"] 0.888888888888889
+
+####### OneVsAll classification via random forest
+srand(42)
+N = 300
+X = rand(N, 2)
+y = Array(Any, N)
+for r in 1:size(X, 1)
+    slope = (X[r, 2]/X[r, 1])
+    y[r] = if slope > 1.
+        :2
+    elseif slope < 0.5
+        '0'
+    else
+        "1"
+    end
+end
+X += randn(N, 2) ./ 20
+clf = RandomForestClassifier(strategy=OneVsAllStrategy())
+fit!(clf, X, y)
+y_pred = predict(clf, X)
+f1 = f1_score(y, y_pred)
+@test_approx_eq f1["0"] 0.9503546099290779
+@test_approx_eq f1["1"] 0 
+@test_approx_eq f1["2"] 0.9666666666666667
+
+####### OneVsAll classification via decision tree
+srand(42)
+N = 300
+X = rand(N, 2)
+y = Array(Any, N)
+for r in 1:size(X, 1)
+    slope = (X[r, 2]/X[r, 1])
+    y[r] = if slope > 1.
+        :2
+    elseif slope < 0.5
+        '0'
+    else
+        "1"
+    end
+end
+X += randn(N, 2) ./ 20
+clf = DecisionTreeClassifier(strategy=OneVsAllStrategy())
+fit!(clf, X, y)
+y_pred = predict(clf, X)
+f1 = f1_score(y, y_pred)
+@test_approx_eq f1["0"] 1.0
+@test_approx_eq f1["1"] 0.0
+@test_approx_eq f1["2"] 1.0
+
