@@ -25,10 +25,59 @@ typealias Nofloat Union{Void, Float64}
 abstract Estimator
 abstract Classifier <: Estimator
 abstract Regressor <: Estimator
+####### Generic fit function for classification.
+function fit!(clf::Classifier, X::Matrix{Float64}, y::Vector)
+    classes = unique(y)
+    if length(classes) == 2
+        fit_uniclass!(clf, X, y)
+    else
+        fit_multiclass!(clf, X, y, clf.strategy)
+    end
+end
+function fit_multiclass!(clf::Classifier, X::Matrix{Float64}, y::Vector, strategy::OneVsOneStrategy)
+    classes = unique(y)
+    for k in 1:(length(classes) - 1)
+        klass = classes[k]
+        for l in (k + 1):length(classes)
+            lass = classes[l]
+            # Sometimes I don't get Julia or it's overly weird and complicated.
+            idx = reshape(any([(y .== klass) (y .== lass)], 2), length(y))
+            fit_uniclass!(clf, X[idx, :], y[idx])
+        end
+    end
+end
+function predict(clf::Classifier, X::Matrix{Float64})
+    if length(clf.estimators) == 1
+        for (classes, estimator) = clf.estimators
+            return predict_uniclass(estimator, classes, X)
+        end
+    else
+        predict_multiclass(clf, X)
+    end
+end
+function predict_multiclass(clf::Classifier, x::Vector{Float64}, strategy::OneVsOneStrategy)
+    votes = Dict{Any, Int}()
+    for (classes, estimator) in clf.estimators
+        y_pred = predict_uniclass(estimator, classes, x')
+        votes[y_pred] = haskey(votes, y_pred) ? votes[y_pred] + 1 : 0
+    end
+    reduce((x, y)->x[2] > y[2] ? x : y, votes)[1]
+end
+function predict_multiclass(clf::Classifier, X::Matrix{Float64})
+    y = Vector(size(X, 1))
+    for i in 1:size(X, 1)
+        y[i] = predict_multiclass(clf, reshape(X[i, :], size(X, 2)), clf.strategy)[1]
+    end
+    y
+end
+function clf_key(y::Vector) 
+    classes = unique(y)
+    string(classes[1]) < string(classes[2]) ? (classes[1], classes[2]) : (classes[2], classes[1])
+end
 type SVMWrapper
     kernel::ASCIIString
     degree::Integer
-    gamma::Float64
+    gamma::Union{Void, Float64}
     coef0::Float64
     C::Float64
     nu::Float64
@@ -39,15 +88,16 @@ type SVMWrapper
     probability_estimates::Bool
     weights
     verbose::Bool
-    libsvm::LIBSVM.SVMModel
     SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose) = new(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose)
 end
 ################ SVC
 type SVC <: Classifier
+    strategy::MulticlassStrategy
     svm::SVMWrapper
-    SVC(;kernel="rbf", degree=3, gamma=0.0, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose))
+    estimators::Dict{Tuple, LIBSVM.SVMModel}
+    SVC(; strategy::MulticlassStrategy=OneVsOneStrategy(), kernel="rbf", degree=3, gamma=nothing, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(strategy, SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose), Dict{Tuple, LIBSVM.SVMModel}())
 end
-function fit!(svm::SVMWrapper, svm_type::Int32, X::Matrix{Float64}, y::Vector)
+function fit(svm::SVMWrapper, svm_type::Int32, X::Matrix{Float64}, y::Vector)
     function get_kernel(k_str::ASCIIString)
         if k_str == "rbf"
             LIBSVM.RBF
@@ -62,9 +112,9 @@ function fit!(svm::SVMWrapper, svm_type::Int32, X::Matrix{Float64}, y::Vector)
         end
     end
     kernel = get_kernel(svm.kernel)
-    svm.gamma = 1/size(X, 1)
+    svm.gamma = svm.gamma == nothing ? 1.0/size(X, 2) : svm.gamma
     # XXX Use dictionary to store the params in SVM and splice in here.
-    libsvm = LIBSVM.svmtrain(y, X', 
+    LIBSVM.svmtrain(y, X', 
         svm_type=svm_type,
         kernel_type=kernel,
         degree=svm.degree,
@@ -79,18 +129,23 @@ function fit!(svm::SVMWrapper, svm_type::Int32, X::Matrix{Float64}, y::Vector)
         probability_estimates=svm.probability_estimates,
         weights=svm.weights,
         verbose=svm.verbose)
-    svm.libsvm = libsvm
 end
-fit!(clf::SVC, X::Matrix{Float64}, y::Vector) = fit!(clf.svm, Int32(0), X, y)
-predict(clf::SVC, X::Matrix{Float64}) = LIBSVM.svmpredict(clf.svm.libsvm, X')[1]
+function fit_uniclass!(clf::SVC, X::Matrix{Float64}, y::Vector)
+    c_key = clf_key(y)
+    clf.estimators[c_key] = fit(clf.svm, Int32(0), X, y)
+end
+predict_uniclass(estimator::LIBSVM.SVMModel, classes::Tuple, X::Matrix{Float64}) = LIBSVM.svmpredict(estimator, X')[1]
 
 ################ SVR
 type SVR <: Regressor
     svm::SVMWrapper
-    SVR(;kernel="rbf", degree=3, gamma=0.0, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose))
+    libsvm::LIBSVM.SVMModel
+    SVR(;kernel="rbf", degree=3, gamma=nothing, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose))
 end
-fit!{T<:Number}(reg::SVR, X::Matrix{Float64}, y::Vector{T}) = fit!(reg.svm, Int32(3), X, y)
-predict(reg, X::Matrix{Float64}) = LIBSVM.svmpredict(reg.svm.libsvm, X')[1]
+function fit!{T<:Number}(reg::SVR, X::Matrix{Float64}, y::Vector{T})
+    reg.libsvm = fit(reg.svm, Int32(3), X, y)
+end
+predict(reg, X::Matrix{Float64}) = LIBSVM.svmpredict(reg.libsvm, X')[1]
 
 ####### Generalized linear models #######
 type LinearRegression <: Regressor
@@ -109,65 +164,23 @@ function score{T<:Number}(reg::LinearRegression, X::Matrix{Float64}, y::Vector{T
     y_pred = predict(reg, X)
     r2_score(y, y_pred)
 end
-type LogisticRegression <: Regressor
+type LogisticRegression <: Classifier
     strategy::MulticlassStrategy
-    glms::Dict{Tuple, GLM.GeneralizedLinearModel}
-    LogisticRegression(strategy::MulticlassStrategy) = new(strategy, Dict{AbstractString, GLM.GeneralizedLinearModel}())
+    estimators::Dict{Tuple, GLM.GeneralizedLinearModel}
+    LogisticRegression(; strategy::MulticlassStrategy=OneVsOneStrategy()) = new(strategy, Dict{AbstractString, GLM.GeneralizedLinearModel}())
 end
-LogisticRegression() = LogisticRegression(OneVsOneStrategy())
-clf_key(c_1, c_2) = string(c_1) < string(c_2) ? (c_1, c_2) : (c_2, c_1)
-function fit!{T<:Number}(clf::LogisticRegression, X::Matrix{Float64}, y::Vector{T})
-    classes = unique(y)
-    if length(classes) == 2
-        c_key = clf_key(classes[1], classes[2])
-        clf.glms[c_key] = GLM.glm(X, y, GLM.Binomial(), GLM.ProbitLink())
-    else
-        fit_multiclass!(clf, X, y, clf.strategy)
-    end
-end
-function fit_multiclass!{T<:Number}(clf::LogisticRegression, X::Matrix{Float64}, y::Vector{T}, strategy::OneVsOneStrategy)
+function fit_uniclass!{T<:Number}(clf::LogisticRegression, X::Matrix{Float64}, y::Vector{T})
     function coerce_domain(y::Vector{T})
         y_ = sort!(unique(y))
-        # XXX Sort!
         map(y->y == y_[1] ? 0.0 : 1.0, y)
     end
-    classes = unique(y)
-    for k in 1:(length(classes) - 1)
-        klass = classes[k]
-        for l in (k + 1):length(classes)
-            lass = classes[l]
-            c_key = clf_key(klass, lass)
-            # Sometimes I don't get Julia or it's overly weird and complicated.
-            idx = reshape(any([(y .== klass) (y .== lass)], 2), length(y))
-            y_10 = coerce_domain(y[idx])
-            clf.glms[c_key] = GLM.glm(X[idx, :], y_10, GLM.Binomial(), GLM.ProbitLink())
-        end
-    end
+    c_key = clf_key(y)
+    y_10 = coerce_domain(y)
+    clf.estimators[c_key] = GLM.glm(X, y_10, GLM.Binomial(), GLM.ProbitLink())
 end
-function predict_multiclass(clf::LogisticRegression, X::Matrix{Float64})
-    y = Vector{Float64}(size(X, 1))
-    for i in 1:size(X, 1)
-        y[i] = predict_multiclass(clf, reshape(X[i, :], size(X, 2)))
-    end
-    y
-end
-function predict_multiclass(clf::LogisticRegression, x::Vector{Float64})
-    votes = Dict{Any, Int}()
-    for (classes, glm) in clf.glms
-        y_pred = GLM.predict(glm, x')[1] >= 0.5 ? classes[2] : classes[1]
-        votes[y_pred] = haskey(votes, y_pred) ? votes[y_pred] + 1 : 0
-    end
-    reduce((x, y)->x[2] > y[2] ? x : y, votes)[1]
-end
-function predict(clf::LogisticRegression, X::Matrix{Float64})
-    if length(clf.glms) == 1
-        for (classes, glm) = clf.glms
-            y_pred = GLM.predict(glm, X)
-            return map!(x->x>=0.5 ? classes[2] : classes[1], y_pred)
-        end
-    else
-        predict_multiclass(clf::LogisticRegression, X::Matrix{Float64})
-    end
+function predict_uniclass(estimator::GLM.GeneralizedLinearModel, classes::Tuple, X::Matrix{Float64})
+    y_pred = GLM.predict(estimator, X)
+    map!(x->x>=0.5 ? classes[2] : classes[1], y_pred)
 end
 
 ####### Ensemble methods #######
@@ -187,15 +200,17 @@ function score{T<:Number}(reg::RandomForestRegressor, X::Matrix{Float64}, y::Vec
     r2_score(y, y_pred)
 end
 type RandomForestClassifier <: Classifier
+    strategy::MulticlassStrategy
     nsubfeatures::Integer
     ntrees::Integer
-    forest::DecisionTree.Ensemble
-    RandomForestClassifier(;nsubfeatures::Integer=2, ntrees::Integer=5) = new(nsubfeatures, ntrees)
+    estimators::Dict{Tuple, DecisionTree.Ensemble}
+    RandomForestClassifier(;nsubfeatures::Integer=2, ntrees::Integer=5) = new(OneVsOneStrategy(), nsubfeatures, ntrees, Dict{Tuple, DecisionTree.Ensemble}())
 end
-function fit!{T}(reg::RandomForestClassifier, X::Matrix{Float64}, y::Vector{T}) 
-    reg.forest = DecisionTree.build_forest(y, X, reg.nsubfeatures, reg.ntrees)
+function fit_uniclass!(clf::RandomForestClassifier, X::Matrix{Float64}, y::Vector)
+    c_key = clf_key(y)
+    clf.estimators[c_key] = DecisionTree.build_forest(y, X, clf.nsubfeatures, clf.ntrees)
 end
-predict(reg::RandomForestClassifier, X::Matrix{Float64}) = DecisionTree.apply_forest(reg.forest, X)
+predict_uniclass(estimator::DecisionTree.Ensemble, classes::Tuple, X::Matrix{Float64}) = DecisionTree.apply_forest(estimator, X)
 
 ####### DecisionTreeRegressor
 type DecisionTreeRegressor <: Regressor
@@ -212,13 +227,15 @@ function score{T<:Number}(reg::DecisionTreeRegressor, X::Matrix{Float64}, y::Vec
 end
 ####### DecisionTreeClassifier
 type DecisionTreeClassifier <: Classifier
-    tree::DecisionTree.Node
-    DecisionTreeClassifier() = new()
+    strategy::MulticlassStrategy
+    estimators::Dict{Tuple, DecisionTree.Node}
+    DecisionTreeClassifier() = new(OneVsOneStrategy(), Dict{Tuple, DecisionTree.Node}())
 end
-function fit!{T}(reg::DecisionTreeClassifier, X::Matrix{Float64}, y::Vector{T}) 
-    reg.tree = DecisionTree.build_tree(y, X)
+function fit_uniclass!(clf::DecisionTreeClassifier, X::Matrix{Float64}, y::Vector)
+    c_key = clf_key(y)
+    clf.estimators[c_key] = DecisionTree.build_tree(y, X)
 end
-predict(reg::DecisionTreeClassifier, X::Matrix{Float64}) = DecisionTree.apply_tree(reg.tree, X)
+predict_uniclass(estimator::DecisionTree.Node, classes::Tuple, X::Matrix{Float64}) = DecisionTree.apply_tree(estimator, X)
 
 ################ Metrics ###############
 ####### Classifier scores
@@ -232,6 +249,7 @@ get_fn(y_observed, y_pred, label) = sum((y_observed .== label) & !(y_pred .== la
 fun_score(fun::Function, y_observed::Vector, y_pred::Vector, pos_label::Any) = remove_nans(fun(y_observed, y_pred, pos_label))
 function fun_score(fun::Function, y_observed::Vector, y_pred::Vector; ave_fun::Union{ASCIIString, Void}=nothing)
     labels = unique([unique(y_observed); unique(y_pred)])
+    # TODO Allow other labels than string-based
     scors = Dict{ASCIIString, Float64}()
     for (i, label) in enumerate(labels)
         scors[string(label)] = fun(y_observed, y_pred, label)
@@ -587,6 +605,6 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
 end
 
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor, KNeighborsClassifier, RandomForestClassifier, DecisionTreeClassifier, LogisticRegression
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor, RandomForestClassifier, DecisionTreeClassifier, LogisticRegression
 end
 
