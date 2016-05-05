@@ -413,6 +413,30 @@ f1 = f1_score(y, y_pred)
 @test_approx_eq f1["1"] 1.0
 @test_approx_eq f1["2"] 1.0
 
+####### OneVsOne classification via naive bayes
+srand(42)
+N = 300
+X = rand(N, 2)
+y = Array(Any, N)
+for r in 1:size(X, 1)
+    slope = (X[r, 2]/X[r, 1])
+    y[r] = if slope > 1.
+        :2
+    elseif slope < 0.5
+        '0'
+    else
+        "1"
+    end
+end
+X += randn(N, 2) ./ 20
+clf = GaussianNB()
+fit!(clf, X, y)
+y_pred = predict(clf, X)
+f1 = f1_score(y, y_pred)
+@test_approx_eq f1["0"] 0.916030534351145
+@test_approx_eq f1["1"] 0.8297872340425531
+@test_approx_eq f1["2"] 0.9252669039145908
+
 ####### OneVsAll classification via logistic regression
 clf = LogisticRegression(strategy=OneVsAllStrategy())
 srand(42)
@@ -511,4 +535,28 @@ f1 = f1_score(y, y_pred)
 @test_approx_eq f1["0"] 1.0
 @test_approx_eq f1["1"] 0.0
 @test_approx_eq f1["2"] 1.0
+
+####### OneVsAll classification via GaussianNB
+srand(42)
+N = 300
+X = rand(N, 2)
+y = Array(Any, N)
+for r in 1:size(X, 1)
+    slope = (X[r, 2]/X[r, 1])
+    y[r] = if slope > 1.
+        :2
+    elseif slope < 0.5
+        '0'
+    else
+        "1"
+    end
+end
+X += randn(N, 2) ./ 20
+clf = GaussianNB(strategy=OneVsAllStrategy())
+fit!(clf, X, y)
+y_pred = predict(clf, X)
+f1 = f1_score(y, y_pred)
+@test_approx_eq f1["0"] 0.9117647058823528
+@test_approx_eq f1["1"] 0.0
+@test_approx_eq f1["2"] 0.9351535836177474
 

@@ -2,6 +2,12 @@
 # TODO run in parallel wherever possible or advantageous
 # TODO keyword arguments instead of positional ones
 module jlearn
+import LIBSVM
+import MultivariateStats
+import GLM
+import DecisionTree
+import NaiveBayes
+
 ####### Multiclass classification strategies #######
 abstract MulticlassStrategy
 type OneVsOneStrategy <: MulticlassStrategy
@@ -10,10 +16,6 @@ type OneVsAllStrategy <: MulticlassStrategy
 end
 
 ################ SVM ###############
-import LIBSVM
-import MultivariateStats
-import GLM
-import DecisionTree
 ####### Aliases
 typealias Noint Union{Void, Int}
 typealias Nofloat Union{Void, Float64}
@@ -629,7 +631,20 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
     gridsearch
 end
 
+####### GaussianNB #######
+type GaussianNB <: Classifier
+    strategy::MulticlassStrategy
+    estimators::Dict{Tuple, NaiveBayes.GaussianNB}
+    GaussianNB(;strategy::MulticlassStrategy=OneVsOneStrategy()) = new(strategy, Dict{Tuple, NaiveBayes.GaussianNB}())
+end
+function fit_uniclass!(clf::GaussianNB, X::Matrix{Float64}, y::Vector)
+    c_key = clf_key(y)
+    gnb = NaiveBayes.GaussianNB(unique(y), size(X, 2))
+    clf.estimators[c_key] = NaiveBayes.fit(gnb, X', y)
+end
+predict_uniclass(estimator::NaiveBayes.GaussianNB, classes::Tuple, X::Matrix{Float64}) = NaiveBayes.predict(estimator, X')
+
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor, RandomForestClassifier, DecisionTreeClassifier, LogisticRegression, OneVsOneStrategy, OneVsAllStrategy
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor, RandomForestClassifier, DecisionTreeClassifier, LogisticRegression, OneVsOneStrategy, OneVsAllStrategy, GaussianNB
 end
 

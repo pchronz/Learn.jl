@@ -9,15 +9,15 @@ y = Array(Any, N)
 for r in 1:size(X, 1)
     slope = (X[r, 2]/X[r, 1])
     y[r] = if slope > 1.
-        :2
+        2.
     elseif slope < 0.5
-        '0'
+        0.
     else
-        "1"
+        1.
     end
 end
 X += randn(N, 2) ./ 20
-clf = SVC()
+clf = GaussianNB()
 fit!(clf, X, y)
 y_pred = predict(clf, X)
 @show y
