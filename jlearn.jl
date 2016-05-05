@@ -14,6 +14,8 @@ type OneVsOneStrategy <: MulticlassStrategy
 end
 type OneVsAllStrategy <: MulticlassStrategy
 end
+type LDAStrategy <: MulticlassStrategy
+end
 
 ################ SVM ###############
 ####### Aliases
@@ -644,7 +646,27 @@ function fit_uniclass!(clf::GaussianNB, X::Matrix{Float64}, y::Vector)
 end
 predict_uniclass(estimator::NaiveBayes.GaussianNB, classes::Tuple, X::Matrix{Float64}) = NaiveBayes.predict(estimator, X')
 
+####### LinearDiscriminant #######
+type LinearDiscriminantAnalysis <: Classifier
+    strategy::MulticlassStrategy
+    estimators::Dict{Tuple, MultivariateStats.LinearDiscriminant}
+    # TODO Use LDA multiclass instead as default strategy
+    LinearDiscriminantAnalysis(;strategy::MulticlassStrategy=OneVsOneStrategy()) = new(strategy, Dict{Tuple, MultivariateStats.LinearDiscriminant}())
+end
+function fit_uniclass!(clf::LinearDiscriminantAnalysis, X::Matrix{Float64}, y::Vector)
+    classes = unique(y)
+    c_key = clf_key(y)
+    clf.estimators[c_key] = MultivariateStats.fit(MultivariateStats.LinearDiscriminant, X[y .== classes[1], :]', X[y .== classes[2], :]')
+end
+function predict_uniclass(estimator::MultivariateStats.LinearDiscriminant, classes::Tuple, X::Matrix{Float64})
+    y_pn = MultivariateStats.predict(estimator, X')
+    y_pred = Vector(length(y_pn))
+    y_pred[y_pn .== true] = classes[2]
+    y_pred[y_pn .== false] = classes[1]
+    y_pred
+end
+
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor, RandomForestClassifier, DecisionTreeClassifier, LogisticRegression, OneVsOneStrategy, OneVsAllStrategy, GaussianNB
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor, RandomForestClassifier, DecisionTreeClassifier, LogisticRegression, OneVsOneStrategy, OneVsAllStrategy, GaussianNB, LinearDiscriminantAnalysis
 end
 

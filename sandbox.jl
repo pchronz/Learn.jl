@@ -13,11 +13,11 @@ for r in 1:size(X, 1)
     elseif slope < 0.5
         0.
     else
-        1.
+        0.
     end
 end
 X += randn(N, 2) ./ 20
-clf = GaussianNB()
+clf = LinearDiscriminantAnalysis()
 fit!(clf, X, y)
 y_pred = predict(clf, X)
 @show y

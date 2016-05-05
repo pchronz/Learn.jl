@@ -560,3 +560,29 @@ f1 = f1_score(y, y_pred)
 @test_approx_eq f1["1"] 0.0
 @test_approx_eq f1["2"] 0.9351535836177474
 
+####### Discriminant Analysis #######
+####### Linear Discriminant Analysis
+srand(42)
+N = 300
+X = rand(N, 2)
+y = Array(Any, N)
+for r in 1:size(X, 1)
+    slope = (X[r, 2]/X[r, 1])
+    y[r] = if slope > 1.
+        :2
+    elseif slope < 0.5
+        '0'
+    else
+        "1"
+    end
+end
+X += randn(N, 2) ./ 20
+clf = LinearDiscriminantAnalysis()
+fit!(clf, X, y)
+y_pred = predict(clf, X)
+f1 = f1_score(y, y_pred)
+@test_approx_eq f1["0"] 0.9022556390977443
+@test_approx_eq f1["1"] 0.7958115183246073
+@test_approx_eq f1["2"] 0.898550724637681
+
+
