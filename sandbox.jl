@@ -1,26 +1,19 @@
 include("jlearn.jl")
 using jlearn
 using PyPlot
+import Clustering
 
-srand(42)
-N = 300
-X = rand(N, 2)
-y = Array(Any, N)
-for r in 1:size(X, 1)
-    slope = (X[r, 2]/X[r, 1])
-    y[r] = if slope > 1.
-        2.
-    elseif slope < 0.5
-        0.
-    else
-        0.
-    end
-end
-X += randn(N, 2) ./ 20
-clf = LinearDiscriminantAnalysis()
-fit!(clf, X, y)
-y_pred = predict(clf, X)
-@show y
-@show y_pred
-@show f1_score(y, y_pred)
+srand(13)
+N_2 = 150
+X_1 = randn(N_2, 2) .- 3.0
+X_2 = randn(N_2, 2) .+ 3.0
+X = vcat(X_1, X_2)
+clust = Kmeans(n_clusters=2)
+fit!(clust, X)
+@show all(predict(clust, X) .== Clustering.assignments(clust.estimator)')
+scatter(X_1[:, 1], X_2[:, 2], color="red")
+scatter(X_2[:, 1], X_2[:, 2], color="green")
+#scatter(centers[1, 1], centers[2, 1], color="cyan")
+#scatter(centers[1, 2], centers[2, 2], color="yellow")
+#show()
 

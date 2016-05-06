@@ -1,12 +1,14 @@
 # TODO Document
 # TODO run in parallel wherever possible or advantageous
-# TODO keyword arguments instead of positional ones
+# TODO replace Float64 w/ AbstractFloat
 module jlearn
 import LIBSVM
 import MultivariateStats
 import GLM
 import DecisionTree
 import NaiveBayes
+import Clustering
+import Distances
 
 ####### Multiclass classification strategies #######
 abstract MulticlassStrategy
@@ -16,19 +18,26 @@ type OneVsAllStrategy <: MulticlassStrategy
 end
 type LDAStrategy <: MulticlassStrategy
 end
-
-################ SVM ###############
+####### Estimator classes
+abstract Estimator
+abstract Classifier <: Estimator
+abstract Regressor <: Estimator
+abstract Cluster <: Estimator
 ####### Aliases
 typealias Noint Union{Void, Int}
 typealias Nofloat Union{Void, Float64}
 
+function score{T<:AbstractFloat}(clf::Classifier, X::Matrix{T}, y_true::Vector; scoring::Union{Function, Void}=f1_score)
+    y_pred = predict(clf, X)
+    scoring = scoring == nothing ? f1_score : scoring
+    scoring(y_true, y_pred)
+end
+
+################ SVM ###############
 # TODO CSVC
 # TODO NuSVC
 # TODO OneClassSVM
 # TODO NuSVR
-abstract Estimator
-abstract Classifier <: Estimator
-abstract Regressor <: Estimator
 ####### Generic fit function for classification.
 function fit!(clf::Classifier, X::Matrix{Float64}, y::Vector)
     classes = unique(y)
@@ -167,10 +176,10 @@ type SVR <: Regressor
     libsvm::LIBSVM.SVMModel
     SVR(;kernel="rbf", degree=3, gamma=nothing, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose))
 end
-function fit!{T<:Number}(reg::SVR, X::Matrix{Float64}, y::Vector{T})
+function fit!{T<:AbstractFloat}(reg::SVR, X::Matrix{T}, y::Vector{T})
     reg.libsvm = fit(reg.svm, Int32(3), X, y)
 end
-predict(reg, X::Matrix{Float64}) = LIBSVM.svmpredict(reg.libsvm, X')[1]
+predict{T<:AbstractFloat}(reg::SVR, X::Matrix{T}) = LIBSVM.svmpredict(reg.libsvm, X')[1]
 
 ####### Generalized linear models #######
 type LinearRegression <: Regressor
@@ -445,6 +454,11 @@ function predict(pipe::Pipeline, X::Matrix{Float64})
     X = fit_transform!(prepros, X)
     predict(pipe.estimator[2], X)
 end
+function score{T<:AbstractFloat}(pipe::Pipeline, X::Matrix{T}, y_true::Vector; scoring::Union{Function, Void}=nothing)
+    prepros::Vector{Preprocessor} = map(x->x[2], pipe.preprocessors)
+    X = fit_transform!(prepros, X)
+    score(pipe.estimator[2], X, y_true; scoring=scoring)
+end
 
 ################ Cross Validation ###############
 function kfold(y::Vector; k::Integer=10)
@@ -511,7 +525,7 @@ end
 # TODO extend to take a dict of scoring functions
 # TODO Support for average function for scoring?
 # TODO keyword arguments
-function cross_val_score!(estimator::Estimator, X::Matrix{Float64}, y::Vector; cv::Function=stratified_kfold, scoring::Function=f1_score)
+function cross_val_score!(estimator::Estimator, X::Matrix{Float64}, y::Vector; cv::Function=stratified_kfold, scoring::Union{Function, Void}=nothing)
     scores = Dict{ASCIIString, Union(Vector{Float64}, Float64)}()
     for l in unique(y)
         scores[string(l)] = Float64[]
@@ -524,8 +538,7 @@ function cross_val_score!(estimator::Estimator, X::Matrix{Float64}, y::Vector; c
         y_test = y[idx_test]
 
         fit!(estimator, X_tr, y_tr)
-        y_pred = predict(estimator, X_test)
-        scor_f = scoring(y_test, y_pred)
+        scor_f = score(estimator, X_test, y_test; scoring=scoring)
         for (label, scor) in scor_f
             push!(scores[label], scor)
         end
@@ -547,13 +560,13 @@ end
 type GridSearchCV{T<:Estimator}
     estimator::T
     param_grid::Dict{Symbol, Vector}
-    scoring::Function
+    scoring::Union{Function, Void}
     cv::Function
     best_score::Float64
     best_estimator::T
     best_params::Dict{Symbol, Any}
     scores::Dict{Dict{Symbol, Any}, Float64}
-    GridSearchCV(estimator::T, param_grid::Dict{ASCIIString, Vector}; scoring=f1_score, cv=stratified_kfold) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, 0.0)
+    GridSearchCV(estimator::T, param_grid::Dict{ASCIIString, Vector}; scoring=nothing, cv=stratified_kfold) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, 0.0)
 end
 
 # Going through the tree recursively.
@@ -632,6 +645,9 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
     end
     gridsearch
 end
+function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix)
+    error("Not implemented yet")
+end
 
 ####### GaussianNB #######
 type GaussianNB <: Classifier
@@ -666,7 +682,29 @@ function predict_uniclass(estimator::MultivariateStats.LinearDiscriminant, class
     y_pred
 end
 
+####### K-means #######
+type Kmeans <: Cluster
+    n_clusters::Int
+    max_iter::Int
+    max_init::Int
+    init::Symbol
+    tol::Float64
+    estimator::Clustering.KmeansResult
+    Kmeans(;n_clusters::Int=8, max_iter::Int=300, n_init::Int=10, init::Symbol=:kmpp, tol::Float64=1e-4) = new(n_clusters, max_iter, n_init, init, tol)
+end
+function fit!{T<:AbstractFloat}(clust::Kmeans, X::Matrix{T})
+    clust.estimator = Clustering.kmeans(X', clust.n_clusters; maxiter=clust.max_iter, init=clust.init, tol=clust.tol)
+end
+function predict{T<:AbstractFloat}(clust::Kmeans, X::Matrix{T})
+    dmat = Distances.pairwise(Distances.SqEuclidean(), clust.estimator.centers, X')   
+    mod(findmin(dmat, 1)[2] .- 1, size(dmat, 1)) .+ 1
+end
+function score{T<:AbstractFloat}(clust::Kmeans, X::Matrix{T})
+    dmat = Distances.pairwise(Distances.SqEuclidean(), clust.estimator.centers, X')   
+    sum(findmin(dmat, 1)[1])
+end
+
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor, RandomForestClassifier, DecisionTreeClassifier, LogisticRegression, OneVsOneStrategy, OneVsAllStrategy, GaussianNB, LinearDiscriminantAnalysis
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor, RandomForestClassifier, DecisionTreeClassifier, LogisticRegression, OneVsOneStrategy, OneVsAllStrategy, GaussianNB, LinearDiscriminantAnalysis, Kmeans
 end
 

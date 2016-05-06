@@ -585,4 +585,22 @@ f1 = f1_score(y, y_pred)
 @test_approx_eq f1["1"] 0.7958115183246073
 @test_approx_eq f1["2"] 0.898550724637681
 
+####### Clustering #######
+import Clustering
+####### Kmeans
+srand(13)
+N_2 = 150
+X_1 = randn(N_2, 2) .- 3.0
+X_2 = randn(N_2, 2) .+ 3.0
+X_3 = randn(N_2, 2) .+ 6.0
+X = vcat(X_1, X_2, X_3)
+clust = Kmeans(n_clusters=3)
+fit!(clust, X)
+@test all(predict(clust, X) .== Clustering.assignments(clust.estimator)')
+@test score(clust, X) == clust.estimator.totalcost
+
+params = Dict{ASCIIString, Vector}("n_clusters"=>[2, 3, 4])
+gs = GridSearchCV{Kmeans}(Kmeans(), params; cv=y->stratified_kfold(y; k=10))
+fit!(gs, X)
+@test gs.best_score > 0.9
 
