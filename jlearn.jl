@@ -32,6 +32,10 @@ function score{T<:AbstractFloat}(clf::Classifier, X::Matrix{T}, y_true::Vector; 
     scoring = scoring == nothing ? f1_score : scoring
     scoring(y_true, y_pred)
 end
+function score{T<:AbstractFloat}(clust::Cluster, X::Matrix{T}; scoring::Union{Function, Void}=nothing)
+    scoring = scoring == nothing ? score : scoring
+    scoring(clust, X)
+end
 
 ################ SVM ###############
 # TODO CSVC
@@ -194,7 +198,7 @@ function fit!{T<:Number}(reg::LinearRegression, X::Matrix{Float64}, y::Vector{T}
     reg.lm = GLM.lm(X, y)
 end
 predict(reg::LinearRegression, X::Matrix{Float64}) = GLM.predict(reg.lm, X)
-function score{T<:Number}(reg::LinearRegression, X::Matrix{Float64}, y::Vector{T})
+function score{T<:Number, S<:AbstractFloat}(reg::LinearRegression, X::Matrix{S}, y::Vector{T})
     y_pred = predict(reg, X)
     r2_score(y, y_pred)
 end
@@ -233,7 +237,7 @@ function fit!{T<:Number}(reg::RandomForestRegressor, X::Matrix{Float64}, y::Vect
     reg.forest = DecisionTree.build_forest(y, X, reg.nsubfeatures, reg.ntrees)
 end
 predict(reg::RandomForestRegressor, X::Matrix{Float64}) = DecisionTree.apply_forest(reg.forest, X)
-function score{T<:Number}(reg::RandomForestRegressor, X::Matrix{Float64}, y::Vector{T})
+function score{T<:Number, S<:AbstractFloat}(reg::RandomForestRegressor, X::Matrix{S}, y::Vector{T})
     y_pred = predict(reg, X)
     r2_score(y, y_pred)
 end
@@ -259,7 +263,7 @@ function fit!{T<:Number}(reg::DecisionTreeRegressor, X::Matrix{Float64}, y::Vect
     reg.tree = DecisionTree.build_tree(y, X)
 end
 predict(reg::DecisionTreeRegressor, X::Matrix{Float64}) = DecisionTree.apply_tree(reg.tree, X)
-function score{T<:Number}(reg::DecisionTreeRegressor, X::Matrix{Float64}, y::Vector{T})
+function score{T<:Number, S<:AbstractFloat}(reg::DecisionTreeRegressor, X::Matrix{S}, y::Vector{T})
     y_pred = predict(reg, X)
     r2_score(y, y_pred)
 end
@@ -461,15 +465,14 @@ function score{T<:AbstractFloat}(pipe::Pipeline, X::Matrix{T}, y_true::Vector; s
 end
 
 ################ Cross Validation ###############
-function kfold(y::Vector; k::Integer=10)
-    n_items = length(y)
-    if n_items < k
-        error("n_items < k")
+function kfold(n_observations::Int; k::Integer=10)
+    if n_observations < k
+        error("n_observations < k")
     end
     function kfold_producer()
         ratio = (k - 1)/k
-        idx = collect(1:n_items)
-        idx_test = idx .> round(Int, ratio*n_items)
+        idx = collect(1:n_observations)
+        idx_test = idx .> round(Int, ratio*n_observations)
         test_len = sum(idx_test)
         for f in 1:k
             idx_test_f = circshift(idx_test, test_len*(f - 1))
@@ -478,6 +481,8 @@ function kfold(y::Vector; k::Integer=10)
     end
     Task(kfold_producer)
 end
+kfold(y::Vector; k::Integer=10) = kfold(length(y); k=k)
+kfold(X::Matrix; k::Integer=10) = kfold(size(X, 1); k=k)
 
 # TODO Extend accepted types of y to anything reasonable
 function stratified_kfold(y::Vector{Int}; k::Integer=2)
@@ -525,7 +530,7 @@ end
 # TODO extend to take a dict of scoring functions
 # TODO Support for average function for scoring?
 # TODO keyword arguments
-function cross_val_score!(estimator::Estimator, X::Matrix{Float64}, y::Vector; cv::Function=stratified_kfold, scoring::Union{Function, Void}=nothing)
+function cross_val_score!(estimator::Classifier, X::Matrix{Float64}, y::Vector; cv::Function=stratified_kfold, scoring::Union{Function, Void}=nothing)
     scores = Dict{ASCIIString, Union(Vector{Float64}, Float64)}()
     for l in unique(y)
         scores[string(l)] = Float64[]
@@ -549,6 +554,21 @@ function cross_val_score!(estimator::Estimator, X::Matrix{Float64}, y::Vector; c
     scores
 end
 
+function cross_val_score!{T<:AbstractFloat}(estimator::Estimator, X::Matrix{T}; cv::Function=kfold, scoring::Union{Function, Void}=nothing)
+    scores = Vector{Float64}()
+    cv = cv(X)
+    for (fold, (idx_tr, idx_test)) in enumerate(cv)
+        X_tr = X[idx_tr, :]
+        X_test = X[idx_test, :]
+        fit!(estimator, X_tr)
+        scor_f = score(estimator, X_test; scoring=scoring)
+        for scor in scor_f
+            push!(scores, scor)
+        end
+    end
+    mean(scores)
+end
+
 function Base.convert(::Type{Dict{Symbol, Vector}}, params_string::Dict{ASCIIString, Vector})
     params_sym = Dict{Symbol, Vector}()
     for (k, v) in params_string
@@ -567,6 +587,7 @@ type GridSearchCV{T<:Estimator}
     best_params::Dict{Symbol, Any}
     scores::Dict{Dict{Symbol, Any}, Float64}
     GridSearchCV(estimator::T, param_grid::Dict{ASCIIString, Vector}; scoring=nothing, cv=stratified_kfold) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, 0.0)
+    GridSearchCV(estimator::Cluster, param_grid::Dict{ASCIIString, Vector}; scoring=nothing, cv=kfold) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, 0.0)
 end
 
 # Going through the tree recursively.
@@ -646,7 +667,23 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
     gridsearch
 end
 function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix)
-    error("Not implemented yet")
+    param_iterator() = next_params(gridsearch.param_grid, Dict{Symbol, Any}())
+    gridsearch.scores = Dict{Dict{Symbol, Any}, Float64}()
+    for param_set in Task(param_iterator)
+        info("GridSearchCV params: $(param_set)")
+        est = set_params!(gridsearch.estimator, param_set)
+        score_param = cross_val_score!(est, X; cv=gridsearch.cv, scoring=gridsearch.scoring)/size(X, 1)
+        # Store results and their params
+        gridsearch.scores[param_set] = score_param
+        # Store the best result
+        if score_param > gridsearch.best_score
+            gridsearch.best_score = score_param
+            gridsearch.best_estimator = deepcopy(est)
+            gridsearch.best_params = param_set
+        end
+        info("Score: $(score_param)")
+    end
+    gridsearch
 end
 
 ####### GaussianNB #######
@@ -686,14 +723,25 @@ end
 type Kmeans <: Cluster
     n_clusters::Int
     max_iter::Int
-    max_init::Int
+    n_init::Int
     init::Symbol
     tol::Float64
     estimator::Clustering.KmeansResult
     Kmeans(;n_clusters::Int=8, max_iter::Int=300, n_init::Int=10, init::Symbol=:kmpp, tol::Float64=1e-4) = new(n_clusters, max_iter, n_init, init, tol)
 end
 function fit!{T<:AbstractFloat}(clust::Kmeans, X::Matrix{T})
-    clust.estimator = Clustering.kmeans(X', clust.n_clusters; maxiter=clust.max_iter, init=clust.init, tol=clust.tol)
+    best_estimator = Clustering.kmeans(X', clust.n_clusters; maxiter=clust.max_iter, init=clust.init, tol=clust.tol)
+    clust.estimator = best_estimator
+    best_score = score(clust, X)
+    for n in 2:clust.n_init
+        clust.estimator = Clustering.kmeans(X', clust.n_clusters; maxiter=clust.max_iter, init=clust.init, tol=clust.tol)
+        scor = score(clust, X)
+        if scor > best_score
+            best_estimator = clust.estimator
+            best_score = scor
+        end
+    end
+    clust.estimator = best_estimator
 end
 function predict{T<:AbstractFloat}(clust::Kmeans, X::Matrix{T})
     dmat = Distances.pairwise(Distances.SqEuclidean(), clust.estimator.centers, X')   
