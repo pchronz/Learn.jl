@@ -453,15 +453,26 @@ function fit!(pipe::Pipeline, X::Matrix{Float64}, y::Vector)
     fit!(pipe.estimator[2], X, y)
     return pipe
 end
+function fit!{T<:Cluster}(pipe::Pipeline{T}, X::Matrix{Float64})
+    prepros::Vector{Preprocessor} = map(x->x[2], pipe.preprocessors)
+    X = fit_transform!(prepros, X)
+    fit!(pipe.estimator[2], X)
+    return pipe
+end
 function predict(pipe::Pipeline, X::Matrix{Float64})
     prepros::Vector{Preprocessor} = map(x->x[2], pipe.preprocessors)
     X = fit_transform!(prepros, X)
     predict(pipe.estimator[2], X)
 end
-function score{T<:AbstractFloat}(pipe::Pipeline, X::Matrix{T}, y_true::Vector; scoring::Union{Function, Void}=nothing)
+function score{T<:AbstractFloat, S<:Classifier}(pipe::Pipeline{S}, X::Matrix{T}, y_true::Vector; scoring::Union{Function, Void}=nothing)
     prepros::Vector{Preprocessor} = map(x->x[2], pipe.preprocessors)
     X = fit_transform!(prepros, X)
     score(pipe.estimator[2], X, y_true; scoring=scoring)
+end
+function score{T<:AbstractFloat, S<:Cluster}(pipe::Pipeline{S}, X::Matrix{T}; scoring::Union{Function, Void}=nothing)
+    prepros::Vector{Preprocessor} = map(x->x[2], pipe.preprocessors)
+    X = fit_transform!(prepros, X)
+    score(pipe.estimator[2], X; scoring=scoring)
 end
 
 ################ Cross Validation ###############
@@ -587,7 +598,7 @@ type GridSearchCV{T<:Estimator}
     best_params::Dict{Symbol, Any}
     scores::Dict{Dict{Symbol, Any}, Float64}
     GridSearchCV(estimator::T, param_grid::Dict{ASCIIString, Vector}; scoring=nothing, cv=stratified_kfold) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, 0.0)
-    GridSearchCV(estimator::Cluster, param_grid::Dict{ASCIIString, Vector}; scoring=nothing, cv=kfold) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, 0.0)
+    GridSearchCV{S<:Cluster}(estimator::Union{S, Pipeline{S}}, param_grid::Dict{ASCIIString, Vector}; scoring=nothing, cv=kfold) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, 0.0)
 end
 
 # Going through the tree recursively.
