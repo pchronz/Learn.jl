@@ -530,7 +530,7 @@ end
 # TODO extend to take a dict of scoring functions
 # TODO Support for average function for scoring?
 # TODO keyword arguments
-function cross_val_score!(estimator::Classifier, X::Matrix{Float64}, y::Vector; cv::Function=stratified_kfold, scoring::Union{Function, Void}=nothing)
+function cross_val_score!{T<:Classifier}(estimator::Union{T, Pipeline{T}}, X::Matrix{Float64}, y::Vector; cv::Function=stratified_kfold, scoring::Union{Function, Void}=nothing)
     scores = Dict{ASCIIString, Union(Vector{Float64}, Float64)}()
     for l in unique(y)
         scores[string(l)] = Float64[]
