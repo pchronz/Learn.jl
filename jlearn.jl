@@ -32,6 +32,11 @@ function score{T<:AbstractFloat}(clf::Classifier, X::Matrix{T}, y_true::Vector; 
     scoring = scoring == nothing ? f1_score : scoring
     scoring(y_true, y_pred)
 end
+function score{T<:AbstractFloat}(estimator::Regressor, X::Matrix{T}, y_true::Vector; scoring::Union{Function, Void}=r2_score)
+    y_pred = predict(estimator, X)
+    scoring = scoring == nothing ? r2_score : scoring
+    scoring(y_true, y_pred)
+end
 function score{T<:AbstractFloat}(clust::Cluster, X::Matrix{T}; scoring::Union{Function, Void}=nothing)
     scoring = scoring == nothing ? score : scoring
     scoring(clust, X)
@@ -181,7 +186,7 @@ type SVR <: Regressor
     SVR(;kernel="rbf", degree=3, gamma=nothing, coef0=0.0, C=1.0, nu=0.5, p=0.1, cache_size=100.0, eps=0.001, shrinking=true, probability_estimates=false, weights=nothing, verbose=false) = new(SVMWrapper(kernel, degree, gamma, coef0, C, nu, p, cache_size, eps, shrinking, probability_estimates, weights, verbose))
 end
 function fit!{T<:AbstractFloat}(reg::SVR, X::Matrix{T}, y::Vector{T})
-    reg.libsvm = fit(reg.svm, Int32(3), X, y)
+    reg.libsvm = fit(reg.svm, Int32(4), X, y)
 end
 predict{T<:AbstractFloat}(reg::SVR, X::Matrix{T}) = LIBSVM.svmpredict(reg.libsvm, X')[1]
 
@@ -234,6 +239,7 @@ type RandomForestRegressor <: Regressor
     RandomForestRegressor(;nsubfeatures::Integer=2, ntrees::Integer=5) = new(nsubfeatures, ntrees)
 end
 function fit!{T<:Number}(reg::RandomForestRegressor, X::Matrix{Float64}, y::Vector{T}) 
+    # XXX Doesn't seem to work with X that has only one feature
     reg.forest = DecisionTree.build_forest(y, X, reg.nsubfeatures, reg.ntrees)
 end
 predict(reg::RandomForestRegressor, X::Matrix{Float64}) = DecisionTree.apply_forest(reg.forest, X)
@@ -464,7 +470,7 @@ function predict(pipe::Pipeline, X::Matrix{Float64})
     X = fit_transform!(prepros, X)
     predict(pipe.estimator[2], X)
 end
-function score{T<:AbstractFloat, S<:Classifier}(pipe::Pipeline{S}, X::Matrix{T}, y_true::Vector; scoring::Union{Function, Void}=nothing)
+function score{T<:AbstractFloat, S<:Union{Classifier, Regressor}}(pipe::Pipeline{S}, X::Matrix{T}, y_true::Vector; scoring::Union{Function, Void}=nothing)
     prepros::Vector{Preprocessor} = map(x->x[2], pipe.preprocessors)
     X = fit_transform!(prepros, X)
     score(pipe.estimator[2], X, y_true; scoring=scoring)
@@ -494,6 +500,26 @@ function kfold(n_observations::Int; k::Integer=10)
 end
 kfold(y::Vector; k::Integer=10) = kfold(length(y); k=k)
 kfold(X::Matrix; k::Integer=10) = kfold(size(X, 1); k=k)
+
+function shufflesplit(n_observations::Int; k::Integer=10)
+    if n_observations < k
+        error("n_observations < k")
+    end
+    function sp_producer()
+        test_len = round(Int, 1/k*n_observations)
+        idx = collect(1:n_observations)
+        idx_rnd = shuffle(idx)
+        while length(idx_rnd) > 0
+            test_len = min(test_len, length(idx_rnd))
+            idx_test = splice!(idx_rnd, 1:test_len)
+            idx_tr = setdiff(idx, idx_test)
+            produce(idx_test, idx_tr)
+        end
+    end
+    Task(sp_producer)
+end
+shufflesplit(y::Vector; k::Integer=10) = shufflesplit(length(y); k=k)
+shufflesplit(X::Matrix; k::Integer=10) = shufflesplit(size(X, 1); k=k)
 
 # TODO Extend accepted types of y to anything reasonable
 function stratified_kfold(y::Vector{Int}; k::Integer=2)
@@ -541,6 +567,7 @@ end
 # TODO extend to take a dict of scoring functions
 # TODO Support for average function for scoring?
 # TODO keyword arguments
+# Classification
 function cross_val_score!{T<:Classifier}(estimator::Union{T, Pipeline{T}}, X::Matrix{Float64}, y::Vector; cv::Function=stratified_kfold, scoring::Union{Function, Void}=nothing)
     scores = Dict{ASCIIString, Union(Vector{Float64}, Float64)}()
     for l in unique(y)
@@ -552,7 +579,6 @@ function cross_val_score!{T<:Classifier}(estimator::Union{T, Pipeline{T}}, X::Ma
         X_test = X[idx_test, :]
         y_tr = y[idx_tr]
         y_test = y[idx_test]
-
         fit!(estimator, X_tr, y_tr)
         scor_f = score(estimator, X_test, y_test; scoring=scoring)
         for (label, scor) in scor_f
@@ -565,7 +591,26 @@ function cross_val_score!{T<:Classifier}(estimator::Union{T, Pipeline{T}}, X::Ma
     scores
 end
 
-function cross_val_score!{T<:AbstractFloat}(estimator::Estimator, X::Matrix{T}; cv::Function=kfold, scoring::Union{Function, Void}=nothing)
+# Regression
+function cross_val_score!{T<:AbstractFloat, S<:Regressor}(estimator::Union{S, Pipeline{S}}, X::Matrix{T}, y::Vector; cv::Function=kfold, scoring::Union{Function, Void}=nothing)
+    scores = Vector{Float64}()
+    cv = cv(y)
+    for (fold, (idx_tr, idx_test)) in enumerate(cv)
+        X_tr = X[idx_tr, :]
+        X_test = X[idx_test, :]
+        y_tr = y[idx_tr]
+        y_test = y[idx_test]
+        fit!(estimator, X_tr, y_tr)
+        scor_f = score(estimator, X_test, y_test; scoring=scoring)
+        for scor in scor_f
+            push!(scores, scor)
+        end
+    end
+    mean(scores)
+end
+
+# Clustering
+function cross_val_score!{T<:AbstractFloat, S<:Cluster}(estimator::Union{S, Pipeline{S}}, X::Matrix{T}; cv::Function=kfold, scoring::Union{Function, Void}=nothing)
     scores = Vector{Float64}()
     cv = cv(X)
     for (fold, (idx_tr, idx_test)) in enumerate(cv)
@@ -597,8 +642,9 @@ type GridSearchCV{T<:Estimator}
     best_estimator::T
     best_params::Dict{Symbol, Any}
     scores::Dict{Dict{Symbol, Any}, Float64}
-    GridSearchCV(estimator::T, param_grid::Dict{ASCIIString, Vector}; scoring=nothing, cv=stratified_kfold) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, 0.0)
-    GridSearchCV{S<:Cluster}(estimator::Union{S, Pipeline{S}}, param_grid::Dict{ASCIIString, Vector}; scoring=nothing, cv=kfold) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, 0.0)
+    GridSearchCV(estimator::T, param_grid::Dict{ASCIIString, Vector}; scoring=nothing, cv=stratified_kfold) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, -Inf)
+    GridSearchCV{S<:Cluster}(estimator::Union{S, Pipeline{S}}, param_grid::Dict{ASCIIString, Vector}; scoring=nothing, cv=kfold) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, -Inf)
+    GridSearchCV{S<:Regressor}(estimator::Union{S, Pipeline{S}}, param_grid::Dict{ASCIIString, Vector}; scoring=nothing, cv=shufflesplit) = new(estimator, convert(Dict{Symbol, Vector}, param_grid), scoring, cv, -Inf)
 end
 
 # Going through the tree recursively.
@@ -663,8 +709,12 @@ function fit!{T<:Estimator}(gridsearch::GridSearchCV{T}, X::Matrix, y::Vector)
         info("GridSearchCV params: $(param_set)")
         est = set_params!(gridsearch.estimator, param_set)
         scores_param = cross_val_score!(est, X, y; cv=gridsearch.cv, scoring=gridsearch.scoring)
-        # Aggregate scores across labels
-        score_param = reduce((x1, x2)->("sum", x1[2] + x2[2]), scores_param)[2]/length(scores_param)
+        score_param = if typeof(scores_param) <: AbstractFloat
+            scores_param/size(X, 1)
+        else
+            # Aggregate scores across labels
+            reduce((x1, x2)->("sum", x1[2] + x2[2]), scores_param)[2]/length(scores_param)
+        end
         # Store results and their params
         gridsearch.scores[param_set] = score_param
         # Store the best result
@@ -764,6 +814,6 @@ function score{T<:AbstractFloat}(clust::Kmeans, X::Matrix{T})
 end
 
 ################ Exports ###############
-export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor, RandomForestClassifier, DecisionTreeClassifier, LogisticRegression, OneVsOneStrategy, OneVsAllStrategy, GaussianNB, LinearDiscriminantAnalysis, Kmeans
+export SVC, fit!, predict, precision_score, recall_score, f1_score, kfold, stratified_kfold, cross_val_score!, GridSearchCV, MinMaxScaler, fit_transform!, Pipeline, MetaPipeline, StandardScaler, PCA, FastICA, SVR, r2_score, mean_squared_error, explained_variance_score, LinearRegression, score, RandomForestRegressor, DecisionTreeRegressor, RandomForestClassifier, DecisionTreeClassifier, LogisticRegression, OneVsOneStrategy, OneVsAllStrategy, GaussianNB, LinearDiscriminantAnalysis, Kmeans, shufflesplit
 end
 
