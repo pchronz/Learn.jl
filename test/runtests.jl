@@ -1,6 +1,5 @@
-include("jlearn.jl")
+using Learn
 using Base.Test
-using jlearn
 
 ####### Metrics #######
 y = [0, 1, 2, 0, 1, 2]

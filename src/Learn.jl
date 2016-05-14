@@ -1,7 +1,7 @@
 # TODO Document
 # TODO run in parallel wherever possible or advantageous
 # TODO replace Float64 w/ AbstractFloat
-module jlearn
+module Learn
 import LIBSVM
 import MultivariateStats
 import GLM
