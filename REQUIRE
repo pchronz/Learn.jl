@@ -1,1 +1,9 @@
 julia 0.4
+LIBSVM
+MultivariateStats
+GLM
+DecisionTree
+NaiveBayes
+Clustering
+Distances
+
