@@ -18,6 +18,9 @@ fit!(gs, X, y)
 @show gs.best_estimator.estimator
 ```
 
+# Docs
+[Here](http://learnjl.readthedocs.io/en/latest/)
+
 # Current features
 ## Regression
 * SVR
